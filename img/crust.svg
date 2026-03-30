@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0a0a14"/>
+    </linearGradient>
+    <linearGradient id="rust" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f74c00"/>
+      <stop offset="100%" style="stop-color:#b7410e"/>
+    </linearGradient>
+  </defs>
+  <style>
+    @keyframes draw { 0% { stroke-dashoffset: 200; } 100% { stroke-dashoffset: 0; } }
+    @keyframes pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 0.7; } }
+    .pane-anim { animation: draw 3s ease-in-out infinite; stroke-dasharray: 200; }
+    .grid { animation: pulse 4s ease-in-out infinite; }
+  </style>
+  <circle cx="128" cy="128" r="120" fill="url(#bg)" stroke="url(#rust)" stroke-width="3"/>
+  <!-- Grid pattern (TUI panes) -->
+  <g class="grid">
+    <rect x="48" y="56" width="160" height="110" rx="4" fill="none" stroke="#f74c00" stroke-width="1"/>
+    <line x1="128" y1="56" x2="128" y2="166" stroke="#f74c00" stroke-width="0.8" opacity="0.5"/>
+    <line x1="48" y1="100" x2="208" y2="100" stroke="#f74c00" stroke-width="0.8" opacity="0.5"/>
+  </g>
+  <!-- Pane content hints -->
+  <rect x="56" y="64" width="40" height="3" rx="1" fill="#4c4" opacity="0.6"/>
+  <rect x="56" y="72" width="55" height="3" rx="1" fill="#aab" opacity="0.4"/>
+  <rect x="56" y="80" width="48" height="3" rx="1" fill="#aab" opacity="0.4"/>
+  <rect x="136" y="64" width="60" height="3" rx="1" fill="#e2b714" opacity="0.6"/>
+  <rect x="136" y="72" width="50" height="3" rx="1" fill="#aab" opacity="0.4"/>
+  <!-- Active pane border -->
+  <rect class="pane-anim" x="48" y="56" width="78" height="44" rx="2" fill="none" stroke="#51afef" stroke-width="2"/>
+  <!-- Scroll indicator -->
+  <text x="200" y="80" font-family="monospace" font-size="10" fill="#f74c00" opacity="0.6">&#x25BC;</text>
+  <!-- Color swatches -->
+  <rect x="56" y="110" width="8" height="8" fill="#e55"/>
+  <rect x="68" y="110" width="8" height="8" fill="#4c4"/>
+  <rect x="80" y="110" width="8" height="8" fill="#51afef"/>
+  <rect x="92" y="110" width="8" height="8" fill="#e2b714"/>
+  <rect x="104" y="110" width="8" height="8" fill="#f74c00"/>
+  <rect x="56" y="122" width="8" height="8" fill="#a8e"/>
+  <rect x="68" y="122" width="8" height="8" fill="#f80"/>
+  <rect x="80" y="122" width="8" height="8" fill="#77d"/>
+  <text x="128" y="206" font-family="monospace" font-size="22" font-weight="bold" fill="url(#rust)" text-anchor="middle" letter-spacing="2">crust</text>
+  <text x="128" y="224" font-family="monospace" font-size="8" fill="#888" text-anchor="middle">Rust TUI library</text>
+</svg>
