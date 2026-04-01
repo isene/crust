@@ -1,0 +1,479 @@
+//! Pane - the core widget, equivalent to rcurses Pane class
+//!
+//! A positioned rectangle with content, scrolling, borders, and diff-based rendering.
+
+use crate::{display_width, strip_ansi};
+use std::io::{self, Write};
+
+/// A terminal pane with position, size, content, and rendering state
+pub struct Pane {
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub h: u16,
+    pub fg: u16,       // 0-255 or >255 for RGB
+    pub bg: u16,
+    pub border: bool,
+    pub scroll: bool,  // Show scroll indicators
+    pub align: Align,
+    pub ix: usize,     // Top line index (scroll position)
+    pub index: usize,  // User-defined selection index
+    pub prompt: String,
+    pub record: bool,
+    pub history: Vec<String>,
+    pub moreup: bool,
+    pub moredown: bool,
+
+    text: String,
+    line_count: Option<usize>,
+    prev_frame: Vec<String>,  // For diff rendering
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum Align { Left, Center, Right }
+
+impl Pane {
+    /// Create a new pane at position (x, y) with size (w, h) and colors
+    pub fn new(x: u16, y: u16, w: u16, h: u16, fg: u16, bg: u16) -> Self {
+        Self {
+            x, y, w, h, fg, bg,
+            border: false,
+            scroll: true,
+            align: Align::Left,
+            ix: 0,
+            index: 0,
+            prompt: String::new(),
+            record: false,
+            history: Vec::new(),
+            moreup: false,
+            moredown: false,
+            text: String::new(),
+            line_count: None,
+            prev_frame: Vec::new(),
+        }
+    }
+
+    /// Set pane text content (invalidates line_count cache)
+    pub fn set_text(&mut self, text: &str) {
+        if self.record && !self.text.is_empty() {
+            self.history.push(self.text.clone());
+            if self.history.len() > 100 {
+                self.history.remove(0);
+            }
+        }
+        self.text = text.to_string();
+        self.line_count = None;
+    }
+
+    /// Get pane text content
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Get line count (cached)
+    pub fn line_count(&mut self) -> usize {
+        if let Some(c) = self.line_count {
+            return c;
+        }
+        let c = self.text.matches('\n').count() + 1;
+        self.line_count = Some(c);
+        c
+    }
+
+    /// Set text and refresh (like rcurses say - resets scroll)
+    pub fn say(&mut self, text: &str) {
+        self.set_text(text);
+        self.ix = 0;
+        self.refresh();
+    }
+
+    /// Clear content
+    pub fn clear(&mut self) {
+        self.set_text("");
+        self.ix = 0;
+        // Clear the pane area on screen
+        let (content_x, content_y, content_w, content_h) = self.content_area();
+        let blank = " ".repeat(content_w as usize);
+        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+        for row in 0..content_h {
+            print!("\x1b[{};{}H{}{}\x1b[0m", content_y + row, content_x, bg_code, blank);
+        }
+        io::stdout().flush().ok();
+        self.prev_frame.clear();
+    }
+
+    /// Diff-based refresh: only redraws changed lines
+    pub fn refresh(&mut self) {
+        let (cx, cy, cw, ch) = self.content_area();
+        let lines = self.wrap_lines(cw as usize);
+        let total = lines.len();
+
+        // Update scroll state
+        self.moreup = self.ix > 0;
+        self.moredown = self.ix + (ch as usize) < total;
+
+        // Build the frame
+        let mut frame: Vec<String> = Vec::with_capacity(ch as usize);
+        for i in 0..ch as usize {
+            let line_idx = self.ix + i;
+            if line_idx < lines.len() {
+                let line = &lines[line_idx];
+                let aligned = self.align_line(line, cw as usize);
+                frame.push(aligned);
+            } else {
+                frame.push(String::new());
+            }
+        }
+
+        // Diff render: only write changed lines
+        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+        let fg_code = format!("\x1b[38;5;{}m", self.fg);
+
+        for (i, line) in frame.iter().enumerate() {
+            let changed = i >= self.prev_frame.len() || self.prev_frame[i] != *line;
+            if changed {
+                let row = cy + i as u16;
+                // Pad to fill width
+                let vis_len = display_width(line);
+                let pad = if vis_len < cw as usize {
+                    " ".repeat(cw as usize - vis_len)
+                } else {
+                    String::new()
+                };
+                print!("\x1b[{};{}H{}{}{}{}\x1b[0m", row, cx, bg_code, fg_code, line, pad);
+            }
+        }
+
+        // Scroll indicators
+        if self.scroll {
+            if self.moreup {
+                print!("\x1b[{};{}H\x1b[38;5;{}m\u{2206}\x1b[0m",
+                    cy, cx + cw - 1, self.fg);
+            }
+            if self.moredown {
+                print!("\x1b[{};{}H\x1b[38;5;{}m\u{2207}\x1b[0m",
+                    cy + ch - 1, cx + cw - 1, self.fg);
+            }
+        }
+
+        io::stdout().flush().ok();
+        self.prev_frame = frame;
+    }
+
+    /// Force complete repaint (clears diff cache)
+    pub fn full_refresh(&mut self) {
+        self.prev_frame.clear();
+        self.refresh();
+    }
+
+    /// Refresh border only
+    pub fn border_refresh(&mut self) {
+        if self.border {
+            self.draw_border();
+        }
+    }
+
+    /// Scroll up one line
+    pub fn lineup(&mut self) {
+        if self.ix > 0 {
+            self.ix -= 1;
+            self.refresh();
+        }
+    }
+
+    /// Scroll down one line
+    pub fn linedown(&mut self) {
+        let lc = self.line_count();
+        if self.ix < lc.saturating_sub(1) {
+            self.ix += 1;
+            self.refresh();
+        }
+    }
+
+    /// Scroll up one page
+    pub fn pageup(&mut self) {
+        let page = (self.h.saturating_sub(if self.border { 2 } else { 0 })) as usize;
+        self.ix = self.ix.saturating_sub(page.saturating_sub(1));
+        self.refresh();
+    }
+
+    /// Scroll down one page
+    pub fn pagedown(&mut self) {
+        let page = (self.h.saturating_sub(if self.border { 2 } else { 0 })) as usize;
+        let lc = self.line_count();
+        self.ix = (self.ix + page.saturating_sub(1)).min(lc.saturating_sub(page));
+        self.refresh();
+    }
+
+    /// Scroll to top
+    pub fn top(&mut self) {
+        self.ix = 0;
+        self.refresh();
+    }
+
+    /// Scroll to bottom
+    pub fn bottom(&mut self) {
+        let lc = self.line_count();
+        let page = (self.h.saturating_sub(if self.border { 2 } else { 0 })) as usize;
+        self.ix = lc.saturating_sub(page);
+        self.refresh();
+    }
+
+    /// Move pane by relative amounts
+    pub fn move_by(&mut self, dx: i16, dy: i16) {
+        self.x = (self.x as i16 + dx).max(1) as u16;
+        self.y = (self.y as i16 + dy).max(1) as u16;
+        self.full_refresh();
+    }
+
+    /// Ask for input (prompt + initial text, returns edited text)
+    pub fn ask(&mut self, prompt: &str, initial: &str) -> String {
+        self.prompt = prompt.to_string();
+        self.set_text(initial);
+        self.editline()
+    }
+
+    /// Single-line editor with history support
+    pub fn editline(&mut self) -> String {
+        use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+        use crossterm::terminal;
+
+        let (cx, cy, cw, _) = self.content_area();
+        let prompt_w = display_width(&self.prompt);
+        let edit_w = (cw as usize).saturating_sub(prompt_w);
+
+        let mut buf = self.text.clone();
+        let mut cursor = buf.len();
+        let mut hist_pos: Option<usize> = None;
+        let mut saved = String::new();
+
+        // Draw prompt + initial text
+        let redraw = |buf: &str, cursor: usize, prompt: &str, cx: u16, cy: u16, cw: u16, fg: u16, bg: u16| {
+            let prompt_w = display_width(prompt);
+            let edit_w = (cw as usize).saturating_sub(prompt_w);
+            let visible = if buf.len() > edit_w { &buf[buf.len()-edit_w..] } else { buf };
+            let pad = " ".repeat(edit_w.saturating_sub(display_width(visible)));
+            print!("\x1b[{};{}H\x1b[48;5;{}m\x1b[38;5;{}m{}{}{}\x1b[0m",
+                cy, cx, bg, fg, prompt, visible, pad);
+            // Position cursor
+            let cursor_col = cx + prompt_w as u16 + display_width(&buf[..cursor.min(buf.len())]) as u16;
+            print!("\x1b[{};{}H", cy, cursor_col);
+            io::stdout().flush().ok();
+        };
+
+        crossterm::execute!(io::stdout(), crossterm::cursor::Show).ok();
+        redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg);
+
+        loop {
+            let ev = match event::read() {
+                Ok(ev) => ev,
+                Err(_) => break,
+            };
+            match ev {
+                Event::Key(KeyEvent { code, modifiers, .. }) => {
+                    match (code, modifiers) {
+                        (KeyCode::Enter, _) => break,
+                        (KeyCode::Esc, _) => {
+                            buf.clear();
+                            break;
+                        }
+                        (KeyCode::Backspace, _) => {
+                            if cursor > 0 {
+                                cursor -= 1;
+                                buf.remove(cursor);
+                            }
+                        }
+                        (KeyCode::Delete, _) => {
+                            if cursor < buf.len() {
+                                buf.remove(cursor);
+                            }
+                        }
+                        (KeyCode::Left, _) => {
+                            if cursor > 0 { cursor -= 1; }
+                        }
+                        (KeyCode::Right, _) => {
+                            if cursor < buf.len() { cursor += 1; }
+                        }
+                        (KeyCode::Home, _) => cursor = 0,
+                        (KeyCode::End, _) => cursor = buf.len(),
+                        (KeyCode::Up, _) if self.record && !self.history.is_empty() => {
+                            let pos = match hist_pos {
+                                Some(p) => (p + 1).min(self.history.len() - 1),
+                                None => { saved = buf.clone(); 0 }
+                            };
+                            hist_pos = Some(pos);
+                            buf = self.history[self.history.len() - 1 - pos].clone();
+                            cursor = buf.len();
+                        }
+                        (KeyCode::Down, _) if self.record => {
+                            match hist_pos {
+                                Some(0) => {
+                                    hist_pos = None;
+                                    buf = saved.clone();
+                                    cursor = buf.len();
+                                }
+                                Some(p) => {
+                                    hist_pos = Some(p - 1);
+                                    buf = self.history[self.history.len() - p].clone();
+                                    cursor = buf.len();
+                                }
+                                None => {}
+                            }
+                        }
+                        (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
+                            buf.truncate(cursor);
+                        }
+                        (KeyCode::Char(c), _) if c != '\t' => {
+                            buf.insert(cursor, c);
+                            cursor += c.len_utf8();
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+            redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg);
+        }
+
+        crossterm::execute!(io::stdout(), crossterm::cursor::Hide).ok();
+
+        if self.record && !buf.is_empty() {
+            self.history.push(buf.clone());
+            if self.history.len() > 100 {
+                self.history.remove(0);
+            }
+        }
+        self.text = buf.clone();
+        buf
+    }
+
+    /// Clean up caches and history
+    pub fn cleanup(&mut self) {
+        self.prev_frame.clear();
+        self.history.clear();
+        self.line_count = None;
+    }
+
+    // --- Private helpers ---
+
+    /// Calculate content area (inside border if present)
+    fn content_area(&self) -> (u16, u16, u16, u16) {
+        if self.border {
+            (self.x + 1, self.y + 1, self.w.saturating_sub(2), self.h.saturating_sub(2))
+        } else {
+            (self.x, self.y, self.w, self.h)
+        }
+    }
+
+    /// Word-wrap text to fit width, preserving ANSI codes
+    fn wrap_lines(&self, width: usize) -> Vec<String> {
+        if width == 0 {
+            return vec![];
+        }
+        let mut result = Vec::new();
+        for line in self.text.split('\n') {
+            if display_width(line) <= width {
+                result.push(line.to_string());
+            } else {
+                // Word-wrap with ANSI preservation
+                let mut current = String::new();
+                let mut current_width = 0;
+                let mut active_ansi = String::new();
+
+                let chars: Vec<char> = line.chars().collect();
+                let mut i = 0;
+                while i < chars.len() {
+                    // Check for ANSI escape sequence
+                    if chars[i] == '\x1b' && i + 1 < chars.len() && chars[i + 1] == '[' {
+                        let start = i;
+                        i += 2;
+                        while i < chars.len() && !chars[i].is_ascii_alphabetic() {
+                            i += 1;
+                        }
+                        if i < chars.len() {
+                            i += 1; // include the letter
+                        }
+                        let seq: String = chars[start..i].iter().collect();
+                        if seq == "\x1b[0m" {
+                            active_ansi.clear();
+                        } else {
+                            active_ansi = seq.clone();
+                        }
+                        current.push_str(&seq);
+                        continue;
+                    }
+
+                    let ch_width = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(1);
+                    if current_width + ch_width > width {
+                        // Try to break at last space
+                        if let Some(space_pos) = current.rfind(' ') {
+                            let remainder: String = current[space_pos + 1..].to_string();
+                            current.truncate(space_pos);
+                            result.push(current);
+                            current = format!("{}{}", active_ansi, remainder);
+                            current_width = display_width(&strip_ansi(&current));
+                        } else {
+                            result.push(current);
+                            current = active_ansi.clone();
+                            current_width = 0;
+                        }
+                    }
+
+                    current.push(chars[i]);
+                    current_width += ch_width;
+                    i += 1;
+                }
+                if !current.is_empty() || result.is_empty() {
+                    result.push(current);
+                }
+            }
+        }
+        result
+    }
+
+    /// Align a line within the content width
+    fn align_line(&self, line: &str, width: usize) -> String {
+        let vis_len = display_width(line);
+        match self.align {
+            Align::Left => line.to_string(),
+            Align::Center => {
+                if vis_len >= width {
+                    line.to_string()
+                } else {
+                    let pad = (width - vis_len) / 2;
+                    format!("{}{}", " ".repeat(pad), line)
+                }
+            }
+            Align::Right => {
+                if vis_len >= width {
+                    line.to_string()
+                } else {
+                    format!("{}{}", " ".repeat(width - vis_len), line)
+                }
+            }
+        }
+    }
+
+    /// Draw border around pane
+    fn draw_border(&self) {
+        let (x, y, w, h) = (self.x, self.y, self.w, self.h);
+        let fg_code = format!("\x1b[38;5;{}m", self.fg);
+        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+
+        // Top border
+        print!("\x1b[{};{}H{}{}\u{250c}{}\u{2510}",
+            y, x, fg_code, bg_code,
+            "\u{2500}".repeat((w - 2) as usize));
+        // Bottom border
+        print!("\x1b[{};{}H{}{}\u{2514}{}\u{2518}",
+            y + h - 1, x, fg_code, bg_code,
+            "\u{2500}".repeat((w - 2) as usize));
+        // Side borders
+        for row in 1..h - 1 {
+            print!("\x1b[{};{}H{}{}\u{2502}", y + row, x, fg_code, bg_code);
+            print!("\x1b[{};{}H\u{2502}", y + row, x + w - 1);
+        }
+        print!("\x1b[0m");
+        io::stdout().flush().ok();
+    }
+}
