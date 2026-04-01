@@ -11,22 +11,24 @@ pub struct Pane {
     pub y: u16,
     pub w: u16,
     pub h: u16,
-    pub fg: u16,       // 0-255 or >255 for RGB
+    pub fg: u16,
     pub bg: u16,
     pub border: bool,
-    pub scroll: bool,  // Show scroll indicators
+    pub scroll: bool,
+    pub scroll_fg: Option<u16>,  // Custom scroll indicator color
     pub align: Align,
-    pub ix: usize,     // Top line index (scroll position)
-    pub index: usize,  // User-defined selection index
+    pub ix: usize,
+    pub index: usize,
     pub prompt: String,
     pub record: bool,
     pub history: Vec<String>,
     pub moreup: bool,
     pub moredown: bool,
+    pub update: bool,  // Flag for conditional rendering
 
     text: String,
     line_count: Option<usize>,
-    prev_frame: Vec<String>,  // For diff rendering
+    prev_frame: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -39,6 +41,7 @@ impl Pane {
             x, y, w, h, fg, bg,
             border: false,
             scroll: true,
+            scroll_fg: None,
             align: Align::Left,
             ix: 0,
             index: 0,
@@ -47,6 +50,7 @@ impl Pane {
             history: Vec::new(),
             moreup: false,
             moredown: false,
+            update: true,
             text: String::new(),
             line_count: None,
             prev_frame: Vec::new(),
@@ -146,13 +150,14 @@ impl Pane {
 
         // Scroll indicators
         if self.scroll {
+            let sc = self.scroll_fg.unwrap_or(self.fg);
             if self.moreup {
                 print!("\x1b[{};{}H\x1b[38;5;{}m\u{2206}\x1b[0m",
-                    cy, cx + cw - 1, self.fg);
+                    cy, cx + cw - 1, sc);
             }
             if self.moredown {
                 print!("\x1b[{};{}H\x1b[38;5;{}m\u{2207}\x1b[0m",
-                    cy + ch - 1, cx + cw - 1, self.fg);
+                    cy + ch - 1, cx + cw - 1, sc);
             }
         }
 
@@ -160,9 +165,12 @@ impl Pane {
         self.prev_frame = frame;
     }
 
-    /// Force complete repaint (clears diff cache)
+    /// Force complete repaint (clears diff cache, redraws border)
     pub fn full_refresh(&mut self) {
         self.prev_frame.clear();
+        if self.border {
+            self.draw_border();
+        }
         self.refresh();
     }
 
