@@ -110,3 +110,47 @@ pub fn display_width(s: &str) -> usize {
     let stripped = strip_ansi(s);
     UnicodeWidthStr::width(stripped.as_str())
 }
+
+/// Truncate a string to max_width visible characters, preserving ANSI codes.
+/// Like rcurses' shorten method.
+pub fn truncate_ansi(s: &str, max_width: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    let mut result = String::new();
+    let mut visible = 0;
+    let mut in_escape = false;
+    let mut in_csi = false;
+
+    for ch in s.chars() {
+        if in_escape {
+            result.push(ch);
+            if ch == '[' {
+                in_csi = true;
+                in_escape = false;
+            } else {
+                in_escape = false;
+            }
+            continue;
+        }
+        if in_csi {
+            result.push(ch);
+            if ch.is_ascii_alphabetic() {
+                in_csi = false;
+            }
+            continue;
+        }
+        if ch == '\x1b' {
+            in_escape = true;
+            result.push(ch);
+            continue;
+        }
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if visible + w > max_width {
+            break;
+        }
+        visible += w;
+        result.push(ch);
+    }
+    // Close with reset to prevent color bleeding
+    result.push_str("\x1b[0m");
+    result
+}

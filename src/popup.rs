@@ -56,7 +56,7 @@ impl Popup {
                         let lc = self.pane.line_count();
                         if self.pane.index < lc.saturating_sub(1) {
                             self.pane.index += 1;
-                            let visible = (self.pane.h.saturating_sub(2)) as usize;
+                            let visible = self.pane.h as usize;
                             if self.pane.index >= self.pane.ix + visible {
                                 self.pane.ix = self.pane.index - visible + 1;
                             }

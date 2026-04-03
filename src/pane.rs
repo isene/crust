@@ -2,7 +2,7 @@
 //!
 //! A positioned rectangle with content, scrolling, borders, and diff-based rendering.
 
-use crate::{display_width, strip_ansi};
+use crate::{display_width, strip_ansi, truncate_ansi};
 use std::io::{self, Write};
 
 /// A terminal pane with position, size, content, and rendering state
@@ -132,19 +132,30 @@ impl Pane {
         // Diff render: only write changed lines
         let bg_code = format!("\x1b[48;5;{}m", self.bg);
         let fg_code = format!("\x1b[38;5;{}m", self.fg);
+        let pane_colors = format!("{}{}", bg_code, fg_code);
 
         for (i, line) in frame.iter().enumerate() {
             let changed = i >= self.prev_frame.len() || self.prev_frame[i] != *line;
             if changed {
                 let row = cy + i as u16;
-                // Pad to fill width
-                let vis_len = display_width(line);
-                let pad = if vis_len < cw as usize {
-                    " ".repeat(cw as usize - vis_len)
+                // Expand tabs to spaces before measuring
+                let expanded = line.replace('\t', "        ");
+                // Replace \x1b[0m resets with reset+pane_colors to maintain bg/fg
+                let restored = expanded.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
+                let vis_len = display_width(&restored);
+                let max_w = cw as usize;
+                let clipped = if vis_len > max_w {
+                    truncate_ansi(&restored, max_w)
+                } else {
+                    restored
+                };
+                let clipped_len = display_width(&clipped);
+                let pad = if clipped_len < max_w {
+                    " ".repeat(max_w - clipped_len)
                 } else {
                     String::new()
                 };
-                print!("\x1b[{};{}H{}{}{}{}\x1b[0m", row, cx, bg_code, fg_code, line, pad);
+                print!("\x1b[{};{}H{}{}{}\x1b[0m", row, cx, pane_colors, clipped, pad);
             }
         }
 
@@ -200,14 +211,14 @@ impl Pane {
 
     /// Scroll up one page
     pub fn pageup(&mut self) {
-        let page = (self.h.saturating_sub(if self.border { 2 } else { 0 })) as usize;
+        let page = (self.h) as usize;
         self.ix = self.ix.saturating_sub(page.saturating_sub(1));
         self.refresh();
     }
 
     /// Scroll down one page
     pub fn pagedown(&mut self) {
-        let page = (self.h.saturating_sub(if self.border { 2 } else { 0 })) as usize;
+        let page = (self.h) as usize;
         let lc = self.line_count();
         self.ix = (self.ix + page.saturating_sub(1)).min(lc.saturating_sub(page));
         self.refresh();
@@ -222,7 +233,7 @@ impl Pane {
     /// Scroll to bottom
     pub fn bottom(&mut self) {
         let lc = self.line_count();
-        let page = (self.h.saturating_sub(if self.border { 2 } else { 0 })) as usize;
+        let page = (self.h) as usize;
         self.ix = lc.saturating_sub(page);
         self.refresh();
     }
@@ -364,13 +375,10 @@ impl Pane {
 
     // --- Private helpers ---
 
-    /// Calculate content area (inside border if present)
+    /// Content area is always (x, y, w, h).
+    /// Border is drawn OUTSIDE the content area (like rcurses).
     fn content_area(&self) -> (u16, u16, u16, u16) {
-        if self.border {
-            (self.x + 1, self.y + 1, self.w.saturating_sub(2), self.h.saturating_sub(2))
-        } else {
-            (self.x, self.y, self.w, self.h)
-        }
+        (self.x, self.y, self.w, self.h)
     }
 
     /// Word-wrap text to fit width, preserving ANSI codes
@@ -463,23 +471,28 @@ impl Pane {
     }
 
     /// Draw border around pane
+    /// Draw border OUTSIDE the pane area (matching rcurses).
+    /// Border occupies (x-1, y-1) to (x+w, y+h).
     fn draw_border(&self) {
         let (x, y, w, h) = (self.x, self.y, self.w, self.h);
+        let left = x.saturating_sub(1);
+        let top = y.saturating_sub(1);
+        let right = x + w;
+        let bottom = y + h;
         let fg_code = format!("\x1b[38;5;{}m", self.fg);
         let bg_code = format!("\x1b[48;5;{}m", self.bg);
 
-        // Top border
+        // Top border: from (left, top) to (right, top)
+        let hbar = "\u{2500}".repeat(w as usize);
         print!("\x1b[{};{}H{}{}\u{250c}{}\u{2510}",
-            y, x, fg_code, bg_code,
-            "\u{2500}".repeat((w - 2) as usize));
+            top, left, fg_code, bg_code, hbar);
         // Bottom border
         print!("\x1b[{};{}H{}{}\u{2514}{}\u{2518}",
-            y + h - 1, x, fg_code, bg_code,
-            "\u{2500}".repeat((w - 2) as usize));
+            bottom, left, fg_code, bg_code, hbar);
         // Side borders
-        for row in 1..h - 1 {
-            print!("\x1b[{};{}H{}{}\u{2502}", y + row, x, fg_code, bg_code);
-            print!("\x1b[{};{}H\u{2502}", y + row, x + w - 1);
+        for row in 0..h {
+            print!("\x1b[{};{}H{}{}\u{2502}", y + row, left, fg_code, bg_code);
+            print!("\x1b[{};{}H\u{2502}", y + row, right);
         }
         print!("\x1b[0m");
         io::stdout().flush().ok();
