@@ -71,6 +71,12 @@ impl Crust {
         print!("\x1b[2J\x1b[H");
         io::stdout().flush().ok();
     }
+
+    /// Set terminal window title via OSC escape
+    pub fn set_title(title: &str) {
+        print!("\x1b]0;{}\x07", title);
+        io::stdout().flush().ok();
+    }
 }
 
 /// Strip ANSI escape sequences from a string

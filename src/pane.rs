@@ -252,6 +252,21 @@ impl Pane {
         self.editline()
     }
 
+    /// Ask with temporary background color (e.g. dark blue for command input)
+    pub fn ask_with_bg(&mut self, prompt: &str, initial: &str, temp_bg: u16) -> String {
+        let orig_bg = self.bg;
+        self.bg = temp_bg;
+        let result = self.ask(prompt, initial);
+        self.bg = orig_bg;
+        result
+    }
+
+    /// Set terminal window title via OSC escape
+    pub fn set_window_title(title: &str) {
+        print!("\x1b]0;{}\x07", title);
+        io::stdout().flush().ok();
+    }
+
     /// Single-line editor with history support
     pub fn editline(&mut self) -> String {
         use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
