@@ -9,6 +9,9 @@ repository = "https://github.com/isene/crust"
 keywords = ["tui", "terminal", "pane", "ansi", "curses"]
 categories = ["command-line-interface"]
 
+[lib]
+name = "crust"
+
 [dependencies]
 crossterm = "0.28"
 unicode-width = "0.2"

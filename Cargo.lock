@@ -40,15 +40,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crust"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "libc",
- "unicode-width",
-]
-
-[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -56,6 +47,15 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "fe2o3-crust"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "libc",
+ "unicode-width",
 ]
 
 [[package]]
