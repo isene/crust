@@ -185,6 +185,122 @@ impl Pane {
         self.refresh();
     }
 
+    /// Efficient scroll by N lines using terminal scroll regions.
+    /// Only renders the newly exposed line(s) instead of the full pane.
+    /// `delta`: positive = scroll down (content moves up), negative = scroll up.
+    /// Falls back to refresh() if delta is too large or prev_frame is empty.
+    pub fn scroll_refresh(&mut self, delta: i32) {
+        let (cx, cy, cw, ch) = self.content_area();
+        let h = ch as usize;
+        let abs = delta.unsigned_abs() as usize;
+
+        // Fall back to full diff render if delta is large or no previous frame
+        if abs == 0 || abs >= h || self.prev_frame.len() != h {
+            self.refresh();
+            return;
+        }
+
+        let lines = self.wrap_lines(cw as usize);
+        let total = lines.len();
+        self.moreup = self.ix > 0;
+        self.moredown = self.ix + h < total;
+
+        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+        let fg_code = format!("\x1b[38;5;{}m", self.fg);
+        let pane_colors = format!("{}{}", bg_code, fg_code);
+
+        // Clear old scroll indicators before shifting (they'd ghost otherwise)
+        let indicator_col = cx + cw - 1;
+        if self.scroll {
+            print!("\x1b[{};{}H \x1b[{};{}H ", cy, indicator_col, cy + ch - 1, indicator_col);
+        }
+
+        // Set scroll region to pane area
+        let top_row = cy;
+        let bot_row = cy + ch - 1;
+        print!("\x1b[{};{}r", top_row, bot_row);
+
+        if delta > 0 {
+            // Scroll down: content moves up, new lines appear at bottom
+            print!("\x1b[{};1H", bot_row);
+            for _ in 0..abs { print!("\n"); }
+        } else {
+            // Scroll up: content moves down, new lines appear at top
+            print!("\x1b[{};1H", top_row);
+            for _ in 0..abs { print!("\x1bM"); } // reverse index
+        }
+
+        // Reset scroll region
+        print!("\x1b[r");
+
+        // Render only the newly exposed lines
+        if delta > 0 {
+            // New lines at bottom
+            let start = h - abs;
+            for i in start..h {
+                let line_idx = self.ix + i;
+                let content = if line_idx < lines.len() {
+                    self.align_line(&lines[line_idx], cw as usize)
+                } else {
+                    String::new()
+                };
+                self.render_pane_line(cy + i as u16, cx, cw, &pane_colors, &content);
+            }
+        } else {
+            // New lines at top
+            for i in 0..abs {
+                let line_idx = self.ix + i;
+                let content = if line_idx < lines.len() {
+                    self.align_line(&lines[line_idx], cw as usize)
+                } else {
+                    String::new()
+                };
+                self.render_pane_line(cy + i as u16, cx, cw, &pane_colors, &content);
+            }
+        }
+
+        // Scroll indicators
+        if self.scroll {
+            let sc = self.scroll_fg.unwrap_or(self.fg);
+            if self.moreup {
+                print!("\x1b[{};{}H\x1b[38;5;{}m\u{2206}\x1b[0m", cy, cx + cw - 1, sc);
+            }
+            if self.moredown {
+                print!("\x1b[{};{}H\x1b[38;5;{}m\u{2207}\x1b[0m", cy + ch - 1, cx + cw - 1, sc);
+            }
+        }
+
+        io::stdout().flush().ok();
+
+        // Update prev_frame
+        let mut frame: Vec<String> = Vec::with_capacity(h);
+        for i in 0..h {
+            let line_idx = self.ix + i;
+            if line_idx < lines.len() {
+                frame.push(self.align_line(&lines[line_idx], cw as usize));
+            } else {
+                frame.push(String::new());
+            }
+        }
+        self.prev_frame = frame;
+    }
+
+    /// Render a single pane line at the given row
+    fn render_pane_line(&self, row: u16, cx: u16, cw: u16, pane_colors: &str, content: &str) {
+        let expanded = content.replace('\t', "        ");
+        let restored = expanded.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
+        let vis_len = display_width(&restored);
+        let max_w = cw as usize;
+        let clipped = if vis_len > max_w {
+            truncate_ansi(&restored, max_w)
+        } else {
+            restored
+        };
+        let clipped_len = display_width(&clipped);
+        let pad = if clipped_len < max_w { " ".repeat(max_w - clipped_len) } else { String::new() };
+        print!("\x1b[{};{}H{}{}{}\x1b[0m", row, cx, pane_colors, clipped, pad);
+    }
+
     /// Refresh border only
     pub fn border_refresh(&mut self) {
         if self.border {

@@ -93,14 +93,35 @@ pub fn coded(text: &str, spec: &str) -> String {
     }
 }
 
-fn parse_hex(hex: &str) -> Option<(u8, u8, u8)> {
+/// Parse hex color string ("#RRGGBB" or "#RGB") to (r, g, b)
+pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
     let hex = hex.trim_start_matches('#');
     if hex.len() == 6 {
         let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
         let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
         let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
         Some((r, g, b))
+    } else if hex.len() == 3 {
+        let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
+        let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
+        let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
+        Some((r, g, b))
     } else {
         None
     }
+}
+
+// Internal alias for backward compat within this module
+fn parse_hex(hex: &str) -> Option<(u8, u8, u8)> { parse_hex_color(hex) }
+
+/// Convert RGB values to nearest xterm-256 color index
+pub fn rgb_to_xterm(r: u8, g: u8, b: u8) -> u8 {
+    // Grayscale ramp (indices 232-255)
+    if r == g && g == b {
+        if r < 8 { return 16; }
+        if r > 248 { return 231; }
+        return (((r as u16 - 8) * 24 / 247) as u8) + 232;
+    }
+    // 6x6x6 color cube (indices 16-231)
+    16 + 36 * (r / 51) + 6 * (g / 51) + (b / 51)
 }

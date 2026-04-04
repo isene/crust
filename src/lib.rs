@@ -79,6 +79,54 @@ impl Crust {
     }
 }
 
+/// Base64 encode bytes (used by OSC 52 clipboard, Kitty protocol, etc.)
+pub fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[(n >> 18 & 63) as usize] as char);
+        result.push(CHARS[(n >> 12 & 63) as usize] as char);
+        if chunk.len() > 1 { result.push(CHARS[(n >> 6 & 63) as usize] as char); } else { result.push('='); }
+        if chunk.len() > 2 { result.push(CHARS[(n & 63) as usize] as char); } else { result.push('='); }
+    }
+    result
+}
+
+/// Copy text to clipboard via OSC 52 escape sequence.
+/// Works in wezterm, kitty, xterm, and other modern terminals.
+/// Also tries xclip as a non-blocking fallback.
+/// `selection`: "clipboard" (default) or "primary".
+pub fn clipboard_copy(text: &str, selection: &str) {
+    let sel_code = if selection == "primary" { "p" } else { "c" };
+    let encoded = base64_encode(text.as_bytes());
+    print!("\x1b]52;{};{}\x07", sel_code, encoded);
+    io::stdout().flush().ok();
+
+    // Also try xclip as backup (non-blocking spawn)
+    let sel_arg = if selection == "primary" { "primary" } else { "clipboard" };
+    if let Ok(mut child) = std::process::Command::new("xclip")
+        .args(["-selection", sel_arg])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        if let Some(ref mut stdin) = child.stdin {
+            let _ = io::Write::write_all(stdin, text.as_bytes());
+        }
+        std::thread::spawn(move || { let _ = child.wait(); });
+    }
+}
+
+/// Shell-escape a string (single-quote wrapping with quote escaping)
+pub fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Strip ANSI escape sequences from a string
 pub fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
