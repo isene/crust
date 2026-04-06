@@ -140,8 +140,10 @@ impl Pane {
                 let row = cy + i as u16;
                 // Expand tabs to spaces before measuring
                 let expanded = line.replace('\t', "        ");
+                // Strip ANSI background sequences from content (pane bg is authoritative)
+                let no_bg = strip_ansi_bg(&expanded);
                 // Replace \x1b[0m resets with reset+pane_colors to maintain bg/fg
-                let restored = expanded.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
+                let restored = no_bg.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
                 let vis_len = display_width(&restored);
                 let max_w = cw as usize;
                 let clipped = if vis_len > max_w {
@@ -151,7 +153,8 @@ impl Pane {
                 };
                 let clipped_len = display_width(&clipped);
                 let pad = if clipped_len < max_w {
-                    " ".repeat(max_w - clipped_len)
+                    // Reset to pane colors before padding to prevent color bleed from content
+                    format!("\x1b[0m{}{}", pane_colors, " ".repeat(max_w - clipped_len))
                 } else {
                     String::new()
                 };
@@ -179,6 +182,13 @@ impl Pane {
     /// Force complete repaint (clears diff cache, redraws border)
     pub fn full_refresh(&mut self) {
         self.prev_frame.clear();
+        // Clear the entire pane area first to prevent color artifacts from old content
+        let (cx, cy, cw, ch) = self.content_area();
+        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+        let blank = " ".repeat(cw as usize);
+        for row in 0..ch {
+            print!("\x1b[{};{}H{}{}\x1b[0m", cy + row, cx, bg_code, blank);
+        }
         if self.border {
             self.draw_border();
         }
@@ -288,7 +298,8 @@ impl Pane {
     /// Render a single pane line at the given row
     fn render_pane_line(&self, row: u16, cx: u16, cw: u16, pane_colors: &str, content: &str) {
         let expanded = content.replace('\t', "        ");
-        let restored = expanded.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
+        let no_bg = strip_ansi_bg(&expanded);
+        let restored = no_bg.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
         let vis_len = display_width(&restored);
         let max_w = cw as usize;
         let clipped = if vis_len > max_w {
@@ -297,7 +308,9 @@ impl Pane {
             restored
         };
         let clipped_len = display_width(&clipped);
-        let pad = if clipped_len < max_w { " ".repeat(max_w - clipped_len) } else { String::new() };
+        let pad = if clipped_len < max_w {
+            format!("\x1b[0m{}{}", pane_colors, " ".repeat(max_w - clipped_len))
+        } else { String::new() };
         print!("\x1b[{};{}H{}{}{}\x1b[0m", row, cx, pane_colors, clipped, pad);
     }
 
@@ -628,4 +641,85 @@ impl Pane {
         print!("\x1b[0m");
         io::stdout().flush().ok();
     }
+}
+
+/// Strip ANSI background color sequences from a string.
+/// Preserves foreground colors, text attributes, and all UTF-8 content.
+fn strip_ansi_bg(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.char_indices().peekable();
+
+    while let Some((pos, ch)) = chars.next() {
+        if ch == '\x1b' {
+            // Check for CSI sequence: \x1b[...m
+            if let Some(&(_, '[')) = chars.peek() {
+                chars.next(); // consume '['
+                // Collect parameter string until we hit a letter
+                let param_start = if let Some(&(p, _)) = chars.peek() { p } else { continue };
+                let mut end_pos = param_start;
+                let mut terminator = ' ';
+                while let Some(&(p, c)) = chars.peek() {
+                    end_pos = p;
+                    if c.is_ascii_alphabetic() {
+                        terminator = c;
+                        chars.next(); // consume terminator
+                        break;
+                    }
+                    chars.next();
+                }
+                if terminator == 'm' {
+                    let params = &s[param_start..end_pos];
+                    // Check if sequence contains bg codes
+                    let has_bg = params.contains("48;") || params.split(';').any(|p| {
+                        matches!(p.parse::<u32>(), Ok(40..=47) | Ok(49) | Ok(100..=107))
+                    });
+                    if has_bg {
+                        // Rebuild without bg codes
+                        let parts: Vec<&str> = params.split(';').collect();
+                        let mut keep = Vec::new();
+                        let mut i = 0;
+                        while i < parts.len() {
+                            let code: u32 = parts[i].parse().unwrap_or(999);
+                            match code {
+                                40..=47 | 49 | 100..=107 => { i += 1; }
+                                48 => {
+                                    // Skip 48;5;N or 48;2;R;G;B
+                                    if i + 2 < parts.len() && parts[i + 1] == "5" { i += 3; }
+                                    else if i + 4 < parts.len() && parts[i + 1] == "2" { i += 5; }
+                                    else { i += 1; }
+                                }
+                                38 => {
+                                    // Keep fg: 38;5;N or 38;2;R;G;B
+                                    if i + 2 < parts.len() && parts[i + 1] == "5" {
+                                        keep.extend_from_slice(&parts[i..i+3]); i += 3;
+                                    } else if i + 4 < parts.len() && parts[i + 1] == "2" {
+                                        keep.extend_from_slice(&parts[i..i+5]); i += 5;
+                                    } else { keep.push(parts[i]); i += 1; }
+                                }
+                                _ => { keep.push(parts[i]); i += 1; }
+                            }
+                        }
+                        if !keep.is_empty() {
+                            result.push_str("\x1b[");
+                            result.push_str(&keep.join(";"));
+                            result.push('m');
+                        }
+                    } else {
+                        // No bg codes: keep entire sequence
+                        result.push_str(&s[pos..end_pos]);
+                        result.push(terminator);
+                    }
+                } else {
+                    // Non-m terminator: keep as-is
+                    result.push_str(&s[pos..end_pos]);
+                    result.push(terminator);
+                }
+            } else {
+                result.push(ch);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }

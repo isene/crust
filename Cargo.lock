@@ -51,7 +51,7 @@ dependencies = [
 
 [[package]]
 name = "fe2o3-crust"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "crossterm",
  "libc",
