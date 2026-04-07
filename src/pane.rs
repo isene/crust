@@ -138,22 +138,34 @@ impl Pane {
             let changed = i >= self.prev_frame.len() || self.prev_frame[i] != *line;
             if changed {
                 let row = cy + i as u16;
-                // Expand tabs to spaces before measuring
                 let expanded = line.replace('\t', "        ");
-                // Strip ANSI background sequences from content (pane bg is authoritative)
-                let no_bg = strip_ansi_bg(&expanded);
-                // Replace \x1b[0m resets with reset+pane_colors to maintain bg/fg
-                let restored = no_bg.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
-                let vis_len = display_width(&restored);
+                let has_ansi = expanded.contains("\x1b[");
+                let has_bg = has_ansi && has_ansi_bg(&expanded);
                 let max_w = cw as usize;
-                let clipped = if vis_len > max_w {
-                    truncate_ansi(&restored, max_w)
-                } else {
+
+                // Match rcurses: 3 branches based on ANSI content
+                let processed = if has_ansi && has_bg {
+                    // Line has its own bg colors: preserve them, apply pane bg only to padding
+                    let restored = expanded.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
                     restored
+                } else if has_ansi {
+                    // Line has ANSI codes but no bg: strip bg, apply pane colors
+                    let no_bg = strip_ansi_bg(&expanded);
+                    let restored = no_bg.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
+                    restored
+                } else {
+                    // No ANSI: plain text, pane_colors prefix handles coloring
+                    expanded
+                };
+
+                let vis_len = display_width(&processed);
+                let clipped = if vis_len > max_w {
+                    truncate_ansi(&processed, max_w)
+                } else {
+                    processed
                 };
                 let clipped_len = display_width(&clipped);
                 let pad = if clipped_len < max_w {
-                    // Reset to pane colors before padding to prevent color bleed from content
                     format!("\x1b[0m{}{}", pane_colors, " ".repeat(max_w - clipped_len))
                 } else {
                     String::new()
@@ -298,14 +310,26 @@ impl Pane {
     /// Render a single pane line at the given row
     fn render_pane_line(&self, row: u16, cx: u16, cw: u16, pane_colors: &str, content: &str) {
         let expanded = content.replace('\t', "        ");
-        let no_bg = strip_ansi_bg(&expanded);
-        let restored = no_bg.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors));
-        let vis_len = display_width(&restored);
+        let has_ansi = expanded.contains("\x1b[");
+        let has_bg = has_ansi && has_ansi_bg(&expanded);
         let max_w = cw as usize;
-        let clipped = if vis_len > max_w {
-            truncate_ansi(&restored, max_w)
+
+        let processed = if has_ansi && has_bg {
+            // Content has its own bg: preserve it, apply pane bg only to padding
+            expanded.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors))
+        } else if has_ansi {
+            // Content has ANSI but no bg: strip bg artifacts, apply pane colors
+            let no_bg = strip_ansi_bg(&expanded);
+            no_bg.replace("\x1b[0m", &format!("\x1b[0m{}", pane_colors))
         } else {
-            restored
+            expanded
+        };
+
+        let vis_len = display_width(&processed);
+        let clipped = if vis_len > max_w {
+            truncate_ansi(&processed, max_w)
+        } else {
+            processed
         };
         let clipped_len = display_width(&clipped);
         let pad = if clipped_len < max_w {
@@ -641,6 +665,32 @@ impl Pane {
         print!("\x1b[0m");
         io::stdout().flush().ok();
     }
+}
+
+/// Check if a string contains ANSI background color sequences (48;5;N or 48;2;R;G;B).
+/// Matches rcurses' /\e\[[\d;]*48;[25];/ pattern.
+fn has_ansi_bg(s: &str) -> bool {
+    // Look for \e[...48;5; or \e[...48;2; patterns
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len.saturating_sub(5) {
+        if bytes[i] == 0x1b && i + 1 < len && bytes[i + 1] == b'[' {
+            // Found ESC[, scan for 48;5; or 48;2; before the terminator
+            let mut j = i + 2;
+            while j < len && (bytes[j].is_ascii_digit() || bytes[j] == b';') {
+                j += 1;
+            }
+            let params = &s[i + 2..j];
+            if params.contains("48;5;") || params.contains("48;2;") {
+                return true;
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 /// Strip ANSI background color sequences from a string.

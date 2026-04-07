@@ -2,62 +2,86 @@
 //!
 //! Provides ANSI color and attribute formatting for strings.
 
-/// Apply foreground color (0-255)
+/// Apply foreground color (0-255). Resets only fg (SGR 39), not all attributes.
 pub fn fg(text: &str, color: u8) -> String {
-    format!("\x1b[38;5;{}m{}\x1b[0m", color, text)
+    format!("\x1b[38;5;{}m{}\x1b[39m", color, text)
 }
 
 /// Apply foreground color from RGB hex string
 pub fn fg_rgb(text: &str, hex: &str) -> String {
     if let Some((r, g, b)) = parse_hex(hex) {
-        format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, text)
+        format!("\x1b[38;2;{};{};{}m{}\x1b[39m", r, g, b, text)
     } else {
         text.to_string()
     }
 }
 
-/// Apply background color (0-255)
+/// Apply background color (0-255). Resets only bg (SGR 49), not all attributes.
 pub fn bg(text: &str, color: u8) -> String {
-    format!("\x1b[48;5;{}m{}\x1b[0m", color, text)
+    format!("\x1b[48;5;{}m{}\x1b[49m", color, text)
 }
 
 /// Apply background color from RGB hex string
 pub fn bg_rgb(text: &str, hex: &str) -> String {
     if let Some((r, g, b)) = parse_hex(hex) {
-        format!("\x1b[48;2;{};{};{}m{}\x1b[0m", r, g, b, text)
+        format!("\x1b[48;2;{};{};{}m{}\x1b[49m", r, g, b, text)
     } else {
         text.to_string()
     }
 }
 
-/// Apply both foreground and background (0-255)
+/// Apply both foreground and background (0-255). Resets both fg+bg.
 pub fn fb(text: &str, fgc: u8, bgc: u8) -> String {
-    format!("\x1b[38;5;{};48;5;{}m{}\x1b[0m", fgc, bgc, text)
+    format!("\x1b[38;5;{};48;5;{}m{}\x1b[39;49m", fgc, bgc, text)
 }
 
-/// Bold
+/// Bold. Resets only bold (SGR 22).
 pub fn bold(text: &str) -> String {
-    format!("\x1b[1m{}\x1b[0m", text)
+    format!("\x1b[1m{}\x1b[22m", text)
 }
 
-/// Italic
+/// Italic. Resets only italic (SGR 23).
 pub fn italic(text: &str) -> String {
-    format!("\x1b[3m{}\x1b[0m", text)
+    format!("\x1b[3m{}\x1b[23m", text)
 }
 
-/// Underline
+/// Underline. Resets only underline (SGR 24).
 pub fn underline(text: &str) -> String {
-    format!("\x1b[4m{}\x1b[0m", text)
+    format!("\x1b[4m{}\x1b[24m", text)
 }
 
-/// Blink
+/// Blink. Resets only blink (SGR 25).
 pub fn blink(text: &str) -> String {
-    format!("\x1b[5m{}\x1b[0m", text)
+    format!("\x1b[5m{}\x1b[25m", text)
 }
 
-/// Reverse video
+/// Reverse video. Resets only reverse (SGR 27).
 pub fn reverse(text: &str) -> String {
-    format!("\x1b[7m{}\x1b[0m", text)
+    format!("\x1b[7m{}\x1b[27m", text)
+}
+
+/// Apply multiple style attributes in a single ANSI sequence (no nesting issues).
+/// Pass None for fg/bg to leave them at terminal default.
+/// attrs: combination of 'b' (bold), 'i' (italic), 'u' (underline), 'l' (blink), 'r' (reverse)
+pub fn styled(text: &str, fgc: Option<u8>, bgc: Option<u8>, attrs: &str) -> String {
+    let mut codes = Vec::new();
+    if let Some(f) = fgc { codes.push(format!("38;5;{}", f)); }
+    if let Some(b) = bgc { codes.push(format!("48;5;{}", b)); }
+    for ch in attrs.chars() {
+        match ch {
+            'b' => codes.push("1".to_string()),
+            'i' => codes.push("3".to_string()),
+            'u' => codes.push("4".to_string()),
+            'l' => codes.push("5".to_string()),
+            'r' => codes.push("7".to_string()),
+            _ => {}
+        }
+    }
+    if codes.is_empty() {
+        text.to_string()
+    } else {
+        format!("\x1b[{}m{}\x1b[0m", codes.join(";"), text)
+    }
 }
 
 /// Coded format: "fg,bg,biulr" like rcurses .c() method

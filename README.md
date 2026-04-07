@@ -87,6 +87,7 @@ style::italic("text")            // Italic
 style::underline("text")         // Underline
 style::reverse("text")           // Reverse video
 style::coded("text", "196,0,bi") // Coded: fg,bg,attrs
+style::styled("text", "196,0,bi")  // Alias for coded()
 ```
 
 ### Popup
