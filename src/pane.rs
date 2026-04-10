@@ -555,7 +555,8 @@ impl Pane {
             return vec![];
         }
         let mut result = Vec::new();
-        for line in self.text.split('\n') {
+        let expanded_text = self.text.replace('\t', "        ");
+        for line in expanded_text.split('\n') {
             if display_width(line) <= width {
                 result.push(line.to_string());
             } else {
