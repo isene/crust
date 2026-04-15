@@ -14,6 +14,7 @@ pub struct Pane {
     pub fg: u16,
     pub bg: u16,
     pub border: bool,
+    pub border_fg: Option<u16>,  // Custom border color (falls back to fg)
     pub scroll: bool,
     pub scroll_fg: Option<u16>,  // Custom scroll indicator color
     pub align: Align,
@@ -40,6 +41,7 @@ impl Pane {
         Self {
             x, y, w, h, fg, bg,
             border: false,
+            border_fg: None,
             scroll: true,
             scroll_fg: None,
             align: Align::Left,
@@ -648,7 +650,8 @@ impl Pane {
         let top = y.saturating_sub(1);
         let right = x + w;
         let bottom = y + h;
-        let fg_code = format!("\x1b[38;5;{}m", self.fg);
+        let bfg = self.border_fg.unwrap_or(self.fg);
+        let fg_code = format!("\x1b[38;5;{}m", bfg);
         let bg_code = format!("\x1b[48;5;{}m", self.bg);
 
         // Top border: from (left, top) to (right, top)
