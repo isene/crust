@@ -26,6 +26,7 @@ pub struct Pane {
     pub moreup: bool,
     pub moredown: bool,
     pub update: bool,  // Flag for conditional rendering
+    pub wrap: bool,    // Word-wrap long lines (default true)
 
     text: String,
     line_count: Option<usize>,
@@ -53,6 +54,7 @@ impl Pane {
             moreup: false,
             moredown: false,
             update: true,
+            wrap: true,
             text: String::new(),
             line_count: None,
             prev_frame: Vec::new(),
@@ -559,7 +561,7 @@ impl Pane {
         let mut result = Vec::new();
         let expanded_text = self.text.replace('\t', "        ");
         for line in expanded_text.split('\n') {
-            if display_width(line) <= width {
+            if !self.wrap || display_width(line) <= width {
                 result.push(line.to_string());
             } else {
                 // Word-wrap with ANSI preservation
