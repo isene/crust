@@ -132,14 +132,32 @@ pub fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut in_escape = false;
     let mut in_csi = false;
+    let mut in_osc = false;
+    let mut osc_saw_esc = false;
     for ch in s.chars() {
+        if in_osc {
+            // OSC terminated by BEL (\x07) or ST (\x1b\\)
+            if ch == '\x07' {
+                in_osc = false;
+            } else if osc_saw_esc {
+                // Any char after ESC ends the OSC (expected \\)
+                in_osc = false;
+                osc_saw_esc = false;
+            } else if ch == '\x1b' {
+                osc_saw_esc = true;
+            }
+            continue;
+        }
         if in_escape {
             if ch == '[' {
                 in_csi = true;
                 in_escape = false;
+            } else if ch == ']' {
+                in_osc = true;
+                in_escape = false;
             } else {
                 in_escape = false;
-                // Non-CSI escape: skip this char too
+                // Non-CSI/OSC escape: skip this char too
             }
             continue;
         }
@@ -173,12 +191,29 @@ pub fn truncate_ansi(s: &str, max_width: usize) -> String {
     let mut visible = 0;
     let mut in_escape = false;
     let mut in_csi = false;
+    let mut in_osc = false;
+    let mut osc_saw_esc = false;
 
     for ch in s.chars() {
+        if in_osc {
+            result.push(ch);
+            if ch == '\x07' {
+                in_osc = false;
+            } else if osc_saw_esc {
+                in_osc = false;
+                osc_saw_esc = false;
+            } else if ch == '\x1b' {
+                osc_saw_esc = true;
+            }
+            continue;
+        }
         if in_escape {
             result.push(ch);
             if ch == '[' {
                 in_csi = true;
+                in_escape = false;
+            } else if ch == ']' {
+                in_osc = true;
                 in_escape = false;
             } else {
                 in_escape = false;

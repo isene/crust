@@ -592,6 +592,24 @@ impl Pane {
                         continue;
                     }
 
+                    // Check for OSC sequence (e.g. OSC 8 hyperlinks: \x1b]8;;URL\x1b\\)
+                    // Terminated by ST (\x1b\\) or BEL (\x07). Zero-width passthrough.
+                    if chars[i] == '\x1b' && i + 1 < chars.len() && chars[i + 1] == ']' {
+                        let start = i;
+                        i += 2;
+                        while i < chars.len() {
+                            if chars[i] == '\x07' { i += 1; break; }
+                            if chars[i] == '\x1b' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+                                i += 2;
+                                break;
+                            }
+                            i += 1;
+                        }
+                        let seq: String = chars[start..i].iter().collect();
+                        current.push_str(&seq);
+                        continue;
+                    }
+
                     let ch_width = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(1);
                     if current_width + ch_width > width {
                         // Try to break at last space
