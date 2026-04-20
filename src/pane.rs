@@ -182,11 +182,11 @@ impl Pane {
         if self.scroll {
             let sc = self.scroll_fg.unwrap_or(self.fg);
             if self.moreup {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\u{2206}\x1b[0m",
+                print!("\x1b[{};{}H\x1b[38;5;{}m\u{25B3}\x1b[0m",
                     cy, cx + cw - 1, sc);
             }
             if self.moredown {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\u{2207}\x1b[0m",
+                print!("\x1b[{};{}H\x1b[38;5;{}m\u{25BD}\x1b[0m",
                     cy + ch - 1, cx + cw - 1, sc);
             }
         }
@@ -347,6 +347,26 @@ impl Pane {
         if self.border {
             self.draw_border();
         }
+    }
+
+    /// Erase the border glyphs around this pane (corners + top/bottom rows
+    /// + side columns). Used when focus moves away and the caller no longer
+    /// wants the pane to be framed. Paints spaces with the default terminal
+    /// background so it blends into whatever sits outside the pane.
+    pub fn border_clear(&mut self) {
+        let (x, y, w, h) = (self.x, self.y, self.w, self.h);
+        let left = x.saturating_sub(1);
+        let top = y.saturating_sub(1);
+        let right = x + w;
+        let bottom = y + h;
+        let hbar = " ".repeat(w as usize);
+        print!("\x1b[{};{}H\x1b[0m {}{} ", top, left, hbar, " ");
+        print!("\x1b[{};{}H\x1b[0m {}{} ", bottom, left, hbar, " ");
+        for row in 0..h {
+            print!("\x1b[{};{}H\x1b[0m ", y + row, left);
+            print!("\x1b[{};{}H\x1b[0m ", y + row, right);
+        }
+        io::stdout().flush().ok();
     }
 
     /// Scroll up one line

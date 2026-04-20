@@ -184,9 +184,23 @@ pub fn display_width(s: &str) -> usize {
 }
 
 /// Truncate a string to max_width visible characters, preserving ANSI codes.
-/// Like rcurses' shorten method.
+/// Appends an ellipsis "…" marker when actual truncation happens so the
+/// reader can see the line was cut. If the input already fits in max_width,
+/// returns it unchanged (plus a color reset). Like rcurses' shorten method.
 pub fn truncate_ansi(s: &str, max_width: usize) -> String {
     use unicode_width::UnicodeWidthChar;
+
+    // If the whole string already fits, no marker needed.
+    if display_width(s) <= max_width {
+        let mut out = s.to_string();
+        out.push_str("\x1b[0m");
+        return out;
+    }
+
+    // Reserve one visible column for the "…" marker, but only if the pane
+    // is at least 2 cols wide. For 1-col panes we just hard-cut.
+    let target = if max_width >= 2 { max_width - 1 } else { max_width };
+
     let mut result = String::new();
     let mut visible = 0;
     let mut in_escape = false;
@@ -233,11 +247,14 @@ pub fn truncate_ansi(s: &str, max_width: usize) -> String {
             continue;
         }
         let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if visible + w > max_width {
+        if visible + w > target {
             break;
         }
         visible += w;
         result.push(ch);
+    }
+    if max_width >= 2 {
+        result.push('\u{2026}'); // ellipsis
     }
     // Close with reset to prevent color bleeding
     result.push_str("\x1b[0m");
