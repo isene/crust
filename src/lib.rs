@@ -23,6 +23,7 @@ pub mod popup;
 pub mod input;
 pub mod cursor;
 pub mod style;
+pub mod text;
 
 pub use pane::Pane;
 pub use popup::Popup;
