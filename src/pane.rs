@@ -378,9 +378,14 @@ impl Pane {
     }
 
     /// Scroll down one line
+    pub fn visual_line_count(&self) -> usize {
+        let (_, _, cw, _) = self.content_area();
+        self.wrap_lines(cw as usize).len()
+    }
+
     pub fn linedown(&mut self) {
-        let lc = self.line_count();
-        if self.ix < lc.saturating_sub(1) {
+        let total = self.visual_line_count();
+        if self.ix < total.saturating_sub(1) {
             self.ix += 1;
             self.refresh();
         }
@@ -388,16 +393,20 @@ impl Pane {
 
     /// Scroll up one page
     pub fn pageup(&mut self) {
-        let page = (self.h) as usize;
+        let (_, _, _, ch) = self.content_area();
+        let page = ch as usize;
         self.ix = self.ix.saturating_sub(page.saturating_sub(1));
         self.refresh();
     }
 
-    /// Scroll down one page
+    /// Scroll down one page. `ix` is a visual-row index (see refresh), so clamp
+    /// against the wrapped line count, not the logical line count — otherwise
+    /// wrapped content stops pagedown short of the true bottom.
     pub fn pagedown(&mut self) {
-        let page = (self.h) as usize;
-        let lc = self.line_count();
-        self.ix = (self.ix + page.saturating_sub(1)).min(lc.saturating_sub(page));
+        let (_, _, cw, ch) = self.content_area();
+        let total = self.wrap_lines(cw as usize).len();
+        let page = ch as usize;
+        self.ix = (self.ix + page.saturating_sub(1)).min(total.saturating_sub(page));
         self.refresh();
     }
 
@@ -409,9 +418,10 @@ impl Pane {
 
     /// Scroll to bottom
     pub fn bottom(&mut self) {
-        let lc = self.line_count();
-        let page = (self.h) as usize;
-        self.ix = lc.saturating_sub(page);
+        let (_, _, cw, ch) = self.content_area();
+        let total = self.wrap_lines(cw as usize).len();
+        let page = ch as usize;
+        self.ix = total.saturating_sub(page);
         self.refresh();
     }
 
