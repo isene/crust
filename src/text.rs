@@ -76,9 +76,11 @@ pub fn format_table(rows: &[Vec<String>], aligns: &[Align], max_width: usize) ->
             .max(1)
     }).collect();
 
-    // Frame overhead: "│ " prefix + " │ " between cols + " │" suffix.
-    // = 2 + 3 * (n_cols - 1) + 2 = 3 * n_cols + 1
-    let overhead = 3 * n_cols + 1;
+    // Minimal frame: one space padding on either side of each cell + a
+    // single `│` between columns. No outer borders, no top/bottom rule.
+    // Overhead per row: 1 leading space + (w + 2) per column + (n-1)
+    // separators = 1 + sum(w) + 2*n + (n-1) = sum(w) + 3*n.
+    let overhead = 3 * n_cols;
     while widths.iter().sum::<usize>() + overhead > max_width {
         // Shrink the widest column by 1 each pass.
         let max_w = *widths.iter().max().unwrap_or(&0);
@@ -94,38 +96,37 @@ pub fn format_table(rows: &[Vec<String>], aligns: &[Align], max_width: usize) ->
 
     let mut out = String::new();
 
-    // Top border: ┌────┬────┐
-    out.push_str(&border_line(&widths, '┌', '┬', '┐'));
-    out.push('\n');
-
     // Header row.
     out.push_str(&format_row(&rows[0], &widths, &aligns));
     out.push('\n');
 
-    // Header separator.
-    out.push_str(&border_line(&widths, '├', '┼', '┤'));
+    // Header separator only — no outer borders. Lighter visual weight.
+    out.push_str(&header_separator(&widths));
     out.push('\n');
 
     // Body rows.
-    for row in &rows[1..] {
+    for (i, row) in rows[1..].iter().enumerate() {
         out.push_str(&format_row(row, &widths, &aligns));
-        out.push('\n');
+        if i + 1 < rows.len() - 1 { out.push('\n'); }
     }
-
-    // Bottom border.
-    out.push_str(&border_line(&widths, '└', '┴', '┘'));
 
     out
 }
 
-fn border_line(widths: &[usize], left: char, mid: char, right: char) -> String {
+fn header_separator(widths: &[usize]) -> String {
     let mut s = String::new();
-    s.push(left);
+    // Leading space to match row's " cell │ cell " indentation.
+    s.push(' ');
     for (i, w) in widths.iter().enumerate() {
-        s.push_str(&"─".repeat(w + 2));
-        if i + 1 < widths.len() { s.push(mid); }
+        // w visible chars + 1 space on each side, minus the leading space
+        // which is already emitted above (or was consumed by the previous
+        // cross).
+        s.push_str(&"─".repeat(w + 1));
+        if i + 1 < widths.len() {
+            s.push('┼');
+            s.push('─');
+        }
     }
-    s.push(right);
     s
 }
 
@@ -138,14 +139,16 @@ fn format_row(row: &[String], widths: &[usize], aligns: &[Align]) -> String {
 
     let mut out = String::new();
     for li in 0..max_lines {
-        out.push('│');
+        out.push(' ');
         for ci in 0..row.len() {
             let w = widths[ci];
             let cell = wrapped[ci].get(li).cloned().unwrap_or_default();
-            out.push(' ');
             out.push_str(&align_cell(&cell, w, aligns[ci]));
-            out.push(' ');
-            out.push('│');
+            if ci + 1 < row.len() {
+                out.push(' ');
+                out.push('│');
+                out.push(' ');
+            }
         }
         if li + 1 < max_lines { out.push('\n'); }
     }

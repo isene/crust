@@ -583,7 +583,13 @@ impl Pane {
         (self.x, self.y, self.w, self.h)
     }
 
-    /// Word-wrap text to fit width, preserving ANSI codes
+    /// Word-wrap text to fit width, preserving ANSI codes and OSC 8
+    /// hyperlink state. When a wrap splits a line while an OSC 8 hyperlink
+    /// is open, the current segment is closed with an empty OSC 8 and the
+    /// next segment reopens the same URL. Without this, the hyperlink state
+    /// leaks past the pane's trailing padding and kitty-style terminals
+    /// render everything downstream (including other panes) with the
+    /// url_style underline.
     fn wrap_lines(&self, width: usize) -> Vec<String> {
         if width == 0 {
             return vec![];
@@ -598,6 +604,9 @@ impl Pane {
                 let mut current = String::new();
                 let mut current_width = 0;
                 let mut active_ansi = String::new();
+                // OSC 8 link target that's currently open, if any. We need
+                // this to re-open the link on each continuation segment.
+                let mut active_osc_url: Option<String> = None;
 
                 let chars: Vec<char> = line.chars().collect();
                 let mut i = 0;
@@ -636,22 +645,52 @@ impl Pane {
                             i += 1;
                         }
                         let seq: String = chars[start..i].iter().collect();
+                        // Track OSC 8 open/close so we can re-open on wrap.
+                        // Minimal parse: look for `]8;<params>;<URL>` inside seq.
+                        if let Some(rest) = seq.strip_prefix("\x1b]8;") {
+                            let body = rest.trim_end_matches('\x07');
+                            let body = body.strip_suffix("\x1b\\").unwrap_or(body);
+                            // body is `<params>;<URL>` (URL empty means close)
+                            if let Some(sep) = body.find(';') {
+                                let url = &body[sep + 1..];
+                                active_osc_url = if url.is_empty() {
+                                    None
+                                } else {
+                                    Some(url.to_string())
+                                };
+                            }
+                        }
                         current.push_str(&seq);
                         continue;
                     }
 
                     let ch_width = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(1);
                     if current_width + ch_width > width {
+                        // If a hyperlink is open, close it before the wrap
+                        // boundary so the pane's trailing padding + next
+                        // row's leading cells don't inherit the link.
+                        let close_osc = if active_osc_url.is_some() {
+                            "\x1b]8;;\x1b\\"
+                        } else {
+                            ""
+                        };
+                        let reopen_osc = if let Some(ref url) = active_osc_url {
+                            format!("\x1b]8;;{}\x1b\\", url)
+                        } else {
+                            String::new()
+                        };
                         // Try to break at last space
                         if let Some(space_pos) = current.rfind(' ') {
                             let remainder: String = current[space_pos + 1..].to_string();
                             current.truncate(space_pos);
+                            current.push_str(close_osc);
                             result.push(current);
-                            current = format!("{}{}", active_ansi, remainder);
+                            current = format!("{}{}{}", reopen_osc, active_ansi, remainder);
                             current_width = display_width(&strip_ansi(&current));
                         } else {
+                            current.push_str(close_osc);
                             result.push(current);
-                            current = active_ansi.clone();
+                            current = format!("{}{}", reopen_osc, active_ansi);
                             current_width = 0;
                         }
                     }
@@ -659,6 +698,11 @@ impl Pane {
                     current.push(chars[i]);
                     current_width += ch_width;
                     i += 1;
+                }
+                // Final safety: if an OSC 8 link is still open at line end
+                // (caller forgot to close), emit an empty-URL OSC 8 to close.
+                if active_osc_url.is_some() {
+                    current.push_str("\x1b]8;;\x1b\\");
                 }
                 if !current.is_empty() || result.is_empty() {
                     result.push(current);

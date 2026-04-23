@@ -208,17 +208,32 @@ pub fn truncate_ansi(s: &str, max_width: usize) -> String {
     let mut in_csi = false;
     let mut in_osc = false;
     let mut osc_saw_esc = false;
+    // Track whether an OSC 8 hyperlink is currently open so we can close
+    // it before the SGR reset — otherwise the hyperlink state leaks past
+    // this line and kitty's url_style underline bleeds into every cell
+    // that follows (including unrelated panes).
+    let mut osc8_open = false;
+    let mut osc_accum = String::new();
 
     for ch in s.chars() {
         if in_osc {
             result.push(ch);
-            if ch == '\x07' {
-                in_osc = false;
-            } else if osc_saw_esc {
+            if ch == '\x07' || osc_saw_esc {
+                // OSC terminated. If body starts with `8;`, update OSC 8
+                // open/closed state from the URL field.
+                if let Some(rest) = osc_accum.strip_prefix("8;") {
+                    if let Some(sep) = rest.find(';') {
+                        let url = &rest[sep + 1..];
+                        osc8_open = !url.is_empty();
+                    }
+                }
                 in_osc = false;
                 osc_saw_esc = false;
+                osc_accum.clear();
             } else if ch == '\x1b' {
                 osc_saw_esc = true;
+            } else {
+                osc_accum.push(ch);
             }
             continue;
         }
@@ -230,6 +245,7 @@ pub fn truncate_ansi(s: &str, max_width: usize) -> String {
             } else if ch == ']' {
                 in_osc = true;
                 in_escape = false;
+                osc_accum.clear();
             } else {
                 in_escape = false;
             }
@@ -256,6 +272,12 @@ pub fn truncate_ansi(s: &str, max_width: usize) -> String {
     }
     if max_width >= 2 {
         result.push('\u{2026}'); // ellipsis
+    }
+    // If truncation cut a line while an OSC 8 hyperlink was still open,
+    // close it explicitly — \x1b[0m does NOT close OSC 8 state, and
+    // leaving it open makes kitty underline every cell that follows.
+    if osc8_open {
+        result.push_str("\x1b]8;;\x1b\\");
     }
     // Close with reset to prevent color bleeding
     result.push_str("\x1b[0m");
