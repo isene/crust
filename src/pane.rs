@@ -472,14 +472,38 @@ impl Pane {
         let redraw = |buf: &str, cursor: usize, prompt: &str, cx: u16, cy: u16, cw: u16, fg: u16, bg: u16| {
             let prompt_w = display_width(prompt);
             let edit_w = (cw as usize).saturating_sub(prompt_w);
-            let visible = if buf.len() > edit_w { &buf[buf.len()-edit_w..] } else { buf };
-            let pad = " ".repeat(edit_w.saturating_sub(display_width(visible)));
+            // Slice the tail of buf by char count, not byte count, so a
+            // multi-byte char (e.g. 'å') is not split mid-sequence.
+            let visible: String = if buf.chars().count() > edit_w {
+                buf.chars().skip(buf.chars().count() - edit_w).collect()
+            } else {
+                buf.to_string()
+            };
+            let pad = " ".repeat(edit_w.saturating_sub(display_width(&visible)));
             print!("\x1b[{};{}H\x1b[48;5;{}m\x1b[38;5;{}m{}{}{}\x1b[0m",
                 cy, cx, bg, fg, prompt, visible, pad);
-            // Position cursor
-            let cursor_col = cx + prompt_w as u16 + display_width(&buf[..cursor.min(buf.len())]) as u16;
+            // Position cursor by display width of the chars before it.
+            let safe_cursor = cursor.min(buf.len());
+            let prefix = if buf.is_char_boundary(safe_cursor) {
+                &buf[..safe_cursor]
+            } else { "" };
+            let cursor_col = cx + prompt_w as u16 + display_width(prefix) as u16;
             print!("\x1b[{};{}H", cy, cursor_col);
             io::stdout().flush().ok();
+        };
+
+        // Step the byte cursor backwards/forwards by one full char.
+        let prev_boundary = |s: &str, c: usize| -> usize {
+            if c == 0 { return 0; }
+            let mut i = c - 1;
+            while i > 0 && !s.is_char_boundary(i) { i -= 1; }
+            i
+        };
+        let next_boundary = |s: &str, c: usize| -> usize {
+            if c >= s.len() { return s.len(); }
+            let mut i = c + 1;
+            while i < s.len() && !s.is_char_boundary(i) { i += 1; }
+            i
         };
 
         crossterm::execute!(io::stdout(), crossterm::cursor::Show).ok();
@@ -500,20 +524,22 @@ impl Pane {
                         }
                         (KeyCode::Backspace, _) => {
                             if cursor > 0 {
-                                cursor -= 1;
-                                buf.remove(cursor);
+                                let new_cursor = prev_boundary(&buf, cursor);
+                                buf.replace_range(new_cursor..cursor, "");
+                                cursor = new_cursor;
                             }
                         }
                         (KeyCode::Delete, _) => {
                             if cursor < buf.len() {
-                                buf.remove(cursor);
+                                let next = next_boundary(&buf, cursor);
+                                buf.replace_range(cursor..next, "");
                             }
                         }
                         (KeyCode::Left, _) => {
-                            if cursor > 0 { cursor -= 1; }
+                            cursor = prev_boundary(&buf, cursor);
                         }
                         (KeyCode::Right, _) => {
-                            if cursor < buf.len() { cursor += 1; }
+                            cursor = next_boundary(&buf, cursor);
                         }
                         (KeyCode::Home, _) => cursor = 0,
                         (KeyCode::End, _) => cursor = buf.len(),
