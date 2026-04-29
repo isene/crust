@@ -448,36 +448,6 @@ impl Pane {
         result
     }
 
-    /// Set terminal window title via OSC escape
-    pub fn set_window_title(title: &str) {
-        print!("\x1b]0;{}\x07", title);
-        io::stdout().flush().ok();
-    }
-
-    /// Announce this app's identity to the host terminal so the X11 window's
-    /// `WM_NAME` and `WM_ICON_NAME` reflect the running app (not the
-    /// terminal binary). Window managers that match by `WM_NAME` —
-    /// e.g. CHasm's per-class assignment table — can then route Fe₂O₃
-    /// TUIs to the right workspace.
-    ///
-    /// Emits:
-    /// - `OSC 0 ; <name> ST` — sets icon name **and** window title (xterm
-    ///   convention; both go to `WM_ICON_NAME` and `WM_NAME`).
-    /// - `OSC 1 ; <name> ST` — sets icon name only (some terminals).
-    /// - `OSC 2 ; <name> ST` — sets window title only.
-    ///
-    /// We send all three because terminals split responsibility differently;
-    /// the host glass terminal updates `WM_NAME` from whichever it sees
-    /// most recently.
-    ///
-    /// (When the glass terminal grows a custom OSC for `WM_CLASS`, this
-    /// helper will be extended to emit it too.)
-    pub fn set_app_identity(name: &str) {
-        print!("\x1b]0;{}\x07", name);
-        print!("\x1b]1;{}\x07", name);
-        print!("\x1b]2;{}\x07", name);
-        io::stdout().flush().ok();
-    }
 
     /// Single-line editor with history support
     pub fn editline(&mut self) -> String {

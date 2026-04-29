@@ -78,6 +78,29 @@ impl Crust {
         print!("\x1b]0;{}\x07", title);
         io::stdout().flush().ok();
     }
+
+    /// Announce this app's identity to the host terminal so the X11 window's
+    /// `WM_NAME` and `WM_ICON_NAME` reflect the running app (not the
+    /// terminal binary). Window managers that match by `WM_NAME` —
+    /// e.g. CHasm's per-class assignment table — can then route Fe₂O₃
+    /// TUIs to the right workspace.
+    ///
+    /// Emits:
+    /// - `OSC 0 ; <name> ST` — sets icon name **and** window title.
+    /// - `OSC 1 ; <name> ST` — sets icon name only (some terminals).
+    /// - `OSC 2 ; <name> ST` — sets window title only.
+    ///
+    /// All three because terminals split responsibility differently; the host
+    /// terminal updates `WM_NAME` from whichever it sees most recently.
+    ///
+    /// (When the glass terminal grows a custom OSC for `WM_CLASS`, this
+    /// helper will be extended to emit it too.)
+    pub fn set_app_identity(name: &str) {
+        print!("\x1b]0;{}\x07", name);
+        print!("\x1b]1;{}\x07", name);
+        print!("\x1b]2;{}\x07", name);
+        io::stdout().flush().ok();
+    }
 }
 
 /// Base64 encode bytes (used by OSC 52 clipboard, Kitty protocol, etc.)
