@@ -29,6 +29,10 @@ impl Input {
                 Some(Self::key_to_string(code, modifiers))
             }
             Event::Resize(_, _) => Some("RESIZE".to_string()),
+            // Bracketed paste — apps that called EnableBracketedPaste receive
+            // the whole pasted payload as one event. Encode as "PASTE\x00<text>"
+            // so apps can detect it via .starts_with("PASTE\x00").
+            Event::Paste(s) => Some(format!("PASTE\x00{}", s)),
             _ => None,
         }
     }

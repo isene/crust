@@ -195,6 +195,15 @@ impl Pane {
         self.prev_frame = frame;
     }
 
+    /// Mark the diff cache stale without writing anything. Use after the
+    /// host code wipes the screen externally (Crust::clear_screen, alt-screen
+    /// switch on subprocess return) so the next `say()` / `refresh()` sees
+    /// every line as changed and repaints. Cheaper than `full_refresh` when
+    /// the caller is about to call `say()` anyway with fresh content.
+    pub fn invalidate(&mut self) {
+        self.prev_frame.clear();
+    }
+
     /// Force complete repaint (clears diff cache, redraws border)
     pub fn full_refresh(&mut self) {
         self.prev_frame.clear();
