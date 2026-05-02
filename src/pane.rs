@@ -61,14 +61,20 @@ impl Pane {
         }
     }
 
-    /// Set pane text content (invalidates line_count cache)
+    /// Set pane text content (invalidates line_count cache).
+    ///
+    /// Does NOT auto-push the previous text into `history`. The earlier
+    /// auto-push behavior corrupted editline history for any app that
+    /// reused a single pane as both a status bar and a `:` prompt
+    /// (every `say()` shoved the styled status string into the prompt's
+    /// history; recalling with Up/Down replayed SGR-fragments instead of
+    /// the user's commands). Editline's tail still pushes the user-typed
+    /// `buf` explicitly when Enter is hit, so genuine command history
+    /// continues to work — only the spurious pollution is gone.
+    ///
+    /// Apps that want to populate `history` outside an editline session
+    /// should push to `pane.history` directly.
     pub fn set_text(&mut self, text: &str) {
-        if self.record && !self.text.is_empty() {
-            self.history.push(self.text.clone());
-            if self.history.len() > 100 {
-                self.history.remove(0);
-            }
-        }
         self.text = text.to_string();
         self.line_count = None;
     }
