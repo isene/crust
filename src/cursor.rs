@@ -87,6 +87,21 @@ impl Cursor {
         crossterm::execute!(io::stdout(), crossterm::cursor::Show).ok();
     }
 
+    /// Set the host terminal's caret shape via DECSCUSR (`CSI N q`).
+    /// Common values:
+    ///   * 0 / 1 — blinking block (terminal default)
+    ///   * 2     — steady block
+    ///   * 3     — blinking underline
+    ///   * 4     — steady underline
+    ///   * 5     — blinking bar
+    ///   * 6     — steady bar
+    /// Used by editors that change cursor shape per mode (e.g. block in
+    /// Normal, bar in Insert).
+    pub fn shape(n: u8) {
+        print!("\x1b[{} q", n);
+        io::stdout().flush().ok();
+    }
+
     /// Clear n characters from cursor position
     pub fn clear_char(n: u16) {
         print!("\x1b[{}X", n);
