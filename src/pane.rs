@@ -587,6 +587,16 @@ impl Pane {
                         _ => {}
                     }
                 }
+                // Bracketed paste — apps that enabled `\x1b[?2004h` get
+                // multi-byte pastes as a single Paste event. Insert the
+                // payload at the cursor, but flatten any embedded newlines
+                // to spaces so a stray multi-line paste doesn't commit
+                // the prompt mid-paste.
+                Event::Paste(s) => {
+                    let cleaned: String = s.replace(['\r', '\n'], " ");
+                    buf.insert_str(cursor, &cleaned);
+                    cursor += cleaned.len();
+                }
                 _ => {}
             }
             redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg);
@@ -601,6 +611,13 @@ impl Pane {
             }
         }
         self.text = buf.clone();
+        // Editline did its own raw prints throughout the loop; the pane's
+        // prev_frame still reflects whatever was on screen BEFORE ask was
+        // called. Invalidate it so the next say()/refresh() does a full
+        // repaint — otherwise the diff-render says "no change" and leaves
+        // the now-stale prompt + temp bg on screen (visible after ESC,
+        // when the caller restores the regular status bar).
+        self.prev_frame.clear();
         buf
     }
 
