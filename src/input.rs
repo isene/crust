@@ -50,7 +50,15 @@ impl Input {
             }
             KeyCode::BackTab => "S-TAB".to_string(),
             KeyCode::Backspace => {
-                if ctrl { "WBACK".to_string() } else { "BACK".to_string() }
+                // Modifier on Backspace requires the terminal to send
+                // distinct sequences (kitty keyboard protocol or
+                // xterm modifyOtherKeys=2). Apps that want S-BACK
+                // must enable crossterm's keyboard enhancement on
+                // startup; without it, Shift+Backspace looks
+                // identical to plain Backspace at the byte level.
+                if ctrl { "WBACK".to_string() }
+                else if shift { "S-BACK".to_string() }
+                else { "BACK".to_string() }
             }
             KeyCode::Delete => {
                 if ctrl { "C-DEL".to_string() } else { "DEL".to_string() }

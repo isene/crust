@@ -101,6 +101,28 @@ impl Crust {
         print!("\x1b]2;{}\x07", name);
         io::stdout().flush().ok();
     }
+
+    /// Best-effort: ask the terminal for the kitty keyboard
+    /// disambiguation flag so apps can distinguish modified keys
+    /// (e.g. Shift+Backspace from plain Backspace, Ctrl+Tab from
+    /// plain Tab). Terminals that don't grok the CSI 'u' protocol
+    /// silently ignore the request and we fall back to legacy
+    /// single-byte keycodes. Safe to call after `init()`.
+    pub fn enable_modifier_keys() {
+        use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
+        let _ = crossterm::execute!(
+            io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES),
+        );
+    }
+
+    /// Companion to `enable_modifier_keys`; call before `cleanup()`
+    /// so the terminal returns to legacy keyboard mode for whatever
+    /// runs next in the same session.
+    pub fn disable_modifier_keys() {
+        use crossterm::event::PopKeyboardEnhancementFlags;
+        let _ = crossterm::execute!(io::stdout(), PopKeyboardEnhancementFlags);
+    }
 }
 
 /// Base64 encode bytes (used by OSC 52 clipboard, Kitty protocol, etc.)
