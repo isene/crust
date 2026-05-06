@@ -27,6 +27,21 @@ pub struct Pane {
     pub moredown: bool,
     pub update: bool,  // Flag for conditional rendering
     pub wrap: bool,    // Word-wrap long lines (default true)
+    /// When true, `editline` masks each typed character with `•` so
+    /// the user's input isn't visible (password prompts). Cursor
+    /// movement, backspace, paste, and the returned `String` all
+    /// operate on the real chars; only the on-screen rendering is
+    /// substituted. Caller is responsible for clearing the flag
+    /// after the prompt completes.
+    pub secret: bool,
+    /// Word-wrap (`true`, the default) breaks long lines at the last
+    /// space before the pane edge — ideal for prose preview / status
+    /// readability. Char-wrap (`false`) breaks at exactly `width`
+    /// chars regardless of token boundaries. Char-wrap is the right
+    /// choice for any pane whose caller does its own cursor-position
+    /// math against `width`, since word-wrap produces shorter rows
+    /// that the caller can't predict without re-running the algorithm.
+    pub word_wrap: bool,
 
     text: String,
     line_count: Option<usize>,
@@ -55,6 +70,8 @@ impl Pane {
             moredown: false,
             update: true,
             wrap: true,
+            secret: false,
+            word_wrap: true,
             text: String::new(),
             line_count: None,
             prev_frame: Vec::new(),
@@ -184,16 +201,19 @@ impl Pane {
             }
         }
 
-        // Scroll indicators
+        // Scroll indicators — paint on the pane's own bg so the
+        // marker doesn't show through to whatever the cell sat on
+        // before the pane drew there (e.g. an underlying page when
+        // the pane is a centered popup).
         if self.scroll {
             let sc = self.scroll_fg.unwrap_or(self.fg);
             if self.moreup {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\u{25B3}\x1b[0m",
-                    cy, cx + cw - 1, sc);
+                print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{25B3}\x1b[0m",
+                    cy, cx + cw - 1, sc, self.bg);
             }
             if self.moredown {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\u{25BD}\x1b[0m",
-                    cy + ch - 1, cx + cw - 1, sc);
+                print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{25BD}\x1b[0m",
+                    cy + ch - 1, cx + cw - 1, sc, self.bg);
             }
         }
 
@@ -300,14 +320,17 @@ impl Pane {
             }
         }
 
-        // Scroll indicators
+        // Scroll indicators (full_refresh path) — same pane-bg fix
+        // as the diff-render branch above.
         if self.scroll {
             let sc = self.scroll_fg.unwrap_or(self.fg);
             if self.moreup {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\u{2206}\x1b[0m", cy, cx + cw - 1, sc);
+                print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{2206}\x1b[0m",
+                    cy, cx + cw - 1, sc, self.bg);
             }
             if self.moredown {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\u{2207}\x1b[0m", cy + ch - 1, cx + cw - 1, sc);
+                print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{2207}\x1b[0m",
+                    cy + ch - 1, cx + cw - 1, sc, self.bg);
             }
         }
 
@@ -479,25 +502,39 @@ impl Pane {
         let mut saved = String::new();
 
         // Draw prompt + initial text
-        let redraw = |buf: &str, cursor: usize, prompt: &str, cx: u16, cy: u16, cw: u16, fg: u16, bg: u16| {
+        let redraw = |buf: &str, cursor: usize, prompt: &str, cx: u16, cy: u16, cw: u16, fg: u16, bg: u16, secret: bool| {
             let prompt_w = display_width(prompt);
             let edit_w = (cw as usize).saturating_sub(prompt_w);
-            // Slice the tail of buf by char count, not byte count, so a
-            // multi-byte char (e.g. 'å') is not split mid-sequence.
-            let visible: String = if buf.chars().count() > edit_w {
-                buf.chars().skip(buf.chars().count() - edit_w).collect()
+            // Source for visible rendering: real chars unless secret
+            // mode, in which case substitute each char with U+2022 so
+            // the password isn't shown. Slicing happens in char space
+            // either way to preserve UTF-8 boundaries.
+            let source: String = if secret {
+                buf.chars().map(|_| '\u{2022}').collect()
             } else {
                 buf.to_string()
+            };
+            let visible: String = if source.chars().count() > edit_w {
+                source.chars().skip(source.chars().count() - edit_w).collect()
+            } else {
+                source
             };
             let pad = " ".repeat(edit_w.saturating_sub(display_width(&visible)));
             print!("\x1b[{};{}H\x1b[48;5;{}m\x1b[38;5;{}m{}{}{}\x1b[0m",
                 cy, cx, bg, fg, prompt, visible, pad);
             // Position cursor by display width of the chars before it.
+            // In secret mode every char is one column wide (•), so
+            // count chars instead of measuring the real (hidden) text.
             let safe_cursor = cursor.min(buf.len());
-            let prefix = if buf.is_char_boundary(safe_cursor) {
-                &buf[..safe_cursor]
-            } else { "" };
-            let cursor_col = cx + prompt_w as u16 + display_width(prefix) as u16;
+            let cursor_w = if secret {
+                buf[..safe_cursor].chars().count()
+            } else {
+                let prefix = if buf.is_char_boundary(safe_cursor) {
+                    &buf[..safe_cursor]
+                } else { "" };
+                display_width(prefix)
+            };
+            let cursor_col = cx + prompt_w as u16 + cursor_w as u16;
             print!("\x1b[{};{}H", cy, cursor_col);
             io::stdout().flush().ok();
         };
@@ -517,7 +554,7 @@ impl Pane {
         };
 
         crossterm::execute!(io::stdout(), crossterm::cursor::Show).ok();
-        redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg);
+        redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg, self.secret);
 
         loop {
             let ev = match event::read() {
@@ -599,18 +636,20 @@ impl Pane {
                 }
                 _ => {}
             }
-            redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg);
+            redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg, self.secret);
         }
 
         crossterm::execute!(io::stdout(), crossterm::cursor::Hide).ok();
 
-        if self.record && !buf.is_empty() {
+        if self.record && !buf.is_empty() && !self.secret {
             self.history.push(buf.clone());
             if self.history.len() > 100 {
                 self.history.remove(0);
             }
         }
-        self.text = buf.clone();
+        // Never retain a secret input as pane state — the caller already
+        // owns the returned String.
+        self.text = if self.secret { String::new() } else { buf.clone() };
         // Editline did its own raw prints throughout the loop; the pane's
         // prev_frame still reflects whatever was on screen BEFORE ask was
         // called. Invalidate it so the next say()/refresh() does a full
@@ -732,8 +771,8 @@ impl Pane {
                         } else {
                             String::new()
                         };
-                        // Try to break at last space
-                        if let Some(space_pos) = current.rfind(' ') {
+                        // Try to break at last space (word-wrap only)
+                        if let Some(space_pos) = if self.word_wrap { current.rfind(' ') } else { None } {
                             let remainder: String = current[space_pos + 1..].to_string();
                             current.truncate(space_pos);
                             current.push_str(close_osc);
