@@ -756,7 +756,7 @@ impl Pane {
                         continue;
                     }
 
-                    let ch_width = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(1);
+                    let ch_width = crate::cell_width(chars[i]);
                     if current_width + ch_width > width {
                         // If a hyperlink is open, close it before the wrap
                         // boundary so the pane's trailing padding + next

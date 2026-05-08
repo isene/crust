@@ -222,11 +222,69 @@ pub fn strip_ansi(s: &str) -> String {
     result
 }
 
+/// Per-character cell width matching glass's actual rendering rules.
+///
+/// unicode-width's defaults disagree with glass on a handful of cases
+/// because glass widens specific BMP codepoints to handle their
+/// VS16-emoji-presentation form (e.g. ⚠ U+26A0 → 2 cells), and forces
+/// every non-BMP routed codepoint to wide (e.g. regional indicator
+/// 🇺🇸 = 2+2 = 4 cells, where unicode-width would give 1+1 = 2).
+///
+/// When crust's wrap/truncate/pad logic uses unicode-width directly,
+/// any mismatch with glass causes a line to render one or more cells
+/// wider than crust expected — overflowing into the right border or
+/// the next pane and leaving rendering gaps after a redraw. This
+/// function brings the counting back in sync.
+pub fn cell_width(c: char) -> usize {
+    let cp = c as u32;
+    // All non-BMP codepoints render 2 cells in glass (anything routed
+    // to put_emoji is forced wide there). Matches all common emoji
+    // ranges (1F300+, 1F600+, 1F680+, 1F900+, 1FA00+) and notably
+    // regional indicators (1F1E6..1F1FF) which unicode-width gives 1.
+    if cp > 0xFFFF {
+        return 2;
+    }
+    // BMP emoji ranges that glass routes through put_emoji + is_wide_bmp:
+    //   2300..23FF, 2600..27BF, 2B00..2BFF
+    // Inside those, glass returns 2 if codepoint is in wide_bmp_ranges,
+    // else 1. Outside those, glass uses the text path (1 cell for
+    // anything narrow, ambiguous, or neutral).
+    let in_emoji_range = matches!(
+        cp,
+        0x2300..=0x23FF | 0x2600..=0x27BF | 0x2B00..=0x2BFF
+    );
+    if in_emoji_range {
+        return if is_glass_wide_bmp(cp) { 2 } else { 1 };
+    }
+    use unicode_width::UnicodeWidthChar;
+    UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// Mirror of glass.asm's wide_bmp_ranges table, restricted to the
+/// codepoints that actually fall inside one of glass's emoji-routing
+/// ranges (entries outside those ranges are dead code in glass and
+/// would mismatch — for those, fall through to unicode-width).
+fn is_glass_wide_bmp(cp: u32) -> bool {
+    matches!(cp,
+        // 2300..23FF: Misc Technical
+        0x231A..=0x231B | 0x23E9..=0x23EC | 0x23F0 | 0x23F3 |
+        // 2600..27BF: Misc Symbols + Dingbats
+        0x2614..=0x2615 | 0x2648..=0x2653 | 0x267F | 0x2693 |
+        0x26A0 | 0x26A1 | 0x26AA..=0x26AB | 0x26BD..=0x26BE |
+        0x26C4..=0x26C5 | 0x26CE | 0x26D4 | 0x26EA |
+        0x26F2..=0x26F3 | 0x26F5 | 0x26FA | 0x26FD |
+        0x2705 | 0x270A..=0x270B | 0x2728 | 0x274C | 0x274E |
+        0x2753..=0x2755 | 0x2757 | 0x2795..=0x2797 |
+        0x27B0 | 0x27BF |
+        // 2B00..2BFF: Misc Symbols and Arrows
+        0x2B05..=0x2B07 | 0x2B1B..=0x2B1C | 0x2B50 | 0x2B55
+    )
+}
+
 /// Calculate visible display width of a string (excluding ANSI, handling Unicode)
 pub fn display_width(s: &str) -> usize {
-    use unicode_width::UnicodeWidthStr;
     let stripped = strip_ansi(s);
-    UnicodeWidthStr::width(stripped.as_str())
+    stripped.chars().map(cell_width).sum()
 }
 
 /// Truncate a string to max_width visible characters, preserving ANSI codes.
@@ -234,8 +292,6 @@ pub fn display_width(s: &str) -> usize {
 /// reader can see the line was cut. If the input already fits in max_width,
 /// returns it unchanged (plus a color reset). Like rcurses' shorten method.
 pub fn truncate_ansi(s: &str, max_width: usize) -> String {
-    use unicode_width::UnicodeWidthChar;
-
     // If the whole string already fits, no marker needed.
     if display_width(s) <= max_width {
         let mut out = s.to_string();
@@ -308,7 +364,7 @@ pub fn truncate_ansi(s: &str, max_width: usize) -> String {
             result.push(ch);
             continue;
         }
-        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        let w = cell_width(ch);
         if visible + w > target {
             break;
         }
