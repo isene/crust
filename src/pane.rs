@@ -42,6 +42,11 @@ pub struct Pane {
     /// math against `width`, since word-wrap produces shorter rows
     /// that the caller can't predict without re-running the algorithm.
     pub word_wrap: bool,
+    /// Set to `true` by `editline` when the user pressed ESC. Read it
+    /// via `ask_or_cancel`, which returns `None` instead of an empty
+    /// string so callers can distinguish "ESC cancel" from "ENTER on
+    /// empty input". Cleared on every entry into `editline`.
+    pub last_escaped: bool,
 
     text: String,
     line_count: Option<usize>,
@@ -72,6 +77,7 @@ impl Pane {
             wrap: true,
             secret: false,
             word_wrap: true,
+            last_escaped: false,
             text: String::new(),
             line_count: None,
             prev_frame: Vec::new(),
@@ -486,6 +492,16 @@ impl Pane {
         result
     }
 
+    /// Like `ask`, but returns `None` if the user pressed ESC. Lets
+    /// callers distinguish "user cancelled" from "user pressed ENTER
+    /// on an empty default", which `ask` collapses to the same empty
+    /// string. Use this for multi-step flows where ESC at any step
+    /// should bail out of the whole operation.
+    pub fn ask_or_cancel(&mut self, prompt: &str, initial: &str) -> Option<String> {
+        let result = self.ask(prompt, initial);
+        if self.last_escaped { None } else { Some(result) }
+    }
+
 
     /// Single-line editor with history support
     pub fn editline(&mut self) -> String {
@@ -500,6 +516,7 @@ impl Pane {
         let mut cursor = buf.len();
         let mut hist_pos: Option<usize> = None;
         let mut saved = String::new();
+        self.last_escaped = false;
 
         // Draw prompt + initial text
         let redraw = |buf: &str, cursor: usize, prompt: &str, cx: u16, cy: u16, cw: u16, fg: u16, bg: u16, secret: bool| {
@@ -567,6 +584,7 @@ impl Pane {
                         (KeyCode::Enter, _) => break,
                         (KeyCode::Esc, _) => {
                             buf.clear();
+                            self.last_escaped = true;
                             break;
                         }
                         (KeyCode::Backspace, _) => {
