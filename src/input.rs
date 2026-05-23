@@ -6,6 +6,15 @@ use std::time::Duration;
 pub struct Input;
 
 impl Input {
+    /// Non-blocking peek: returns true if at least one input event is
+    /// already queued, false otherwise. Used by image-displaying TUIs
+    /// to skip expensive previews while the user is still hammering
+    /// j/k on autorepeat — render the cheap state now, do the heavy
+    /// graphics work after the burst ends.
+    pub fn peek_pending() -> bool {
+        crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false)
+    }
+
     /// Read a single key event, returning a named string like rcurses.
     /// Returns None on timeout (if timeout_secs is Some).
     pub fn getchr(timeout_secs: Option<u64>) -> Option<String> {
