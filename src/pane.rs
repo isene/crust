@@ -47,6 +47,13 @@ pub struct Pane {
     /// string so callers can distinguish "ESC cancel" from "ENTER on
     /// empty input". Cleared on every entry into `editline`.
     pub last_escaped: bool,
+    /// Optional tab-completion callback for `editline`. Receives the
+    /// current buffer contents; returns the candidate completions
+    /// (each one a full replacement for the buffer). When set,
+    /// pressing Tab in editline cycles through candidates; pressing
+    /// any other key resets the cycle. Function pointer to keep the
+    /// API simple — no captures, completer logic must be pure.
+    pub completer: Option<fn(&str) -> Vec<String>>,
 
     text: String,
     line_count: Option<usize>,
@@ -78,6 +85,7 @@ impl Pane {
             secret: false,
             word_wrap: true,
             last_escaped: false,
+            completer: None,
             text: String::new(),
             line_count: None,
             prev_frame: Vec::new(),
@@ -516,6 +524,10 @@ impl Pane {
         let mut cursor = buf.len();
         let mut hist_pos: Option<usize> = None;
         let mut saved = String::new();
+        // Tab-completion cycle state: the prefix the user typed
+        // before the first Tab, the candidate list, and which one we
+        // last applied. None = not in a cycle. Any non-Tab key resets.
+        let mut tab_state: Option<(String, Vec<String>, usize)> = None;
         self.last_escaped = false;
 
         // Draw prompt + initial text
@@ -634,12 +646,36 @@ impl Pane {
                         }
                         (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
                             buf.truncate(cursor);
+                            tab_state = None;
+                        }
+                        (KeyCode::Tab, _) => {
+                            // Cycle through completions if a completer
+                            // is registered; otherwise eat the Tab
+                            // silently (current behaviour).
+                            if let Some(f) = self.completer {
+                                if let Some((_, candidates, idx)) = tab_state.as_mut() {
+                                    if !candidates.is_empty() {
+                                        *idx = (*idx + 1) % candidates.len();
+                                        buf = candidates[*idx].clone();
+                                        cursor = buf.len();
+                                    }
+                                } else {
+                                    let candidates = f(&buf);
+                                    if !candidates.is_empty() {
+                                        let prefix = buf.clone();
+                                        buf = candidates[0].clone();
+                                        cursor = buf.len();
+                                        tab_state = Some((prefix, candidates, 0));
+                                    }
+                                }
+                            }
                         }
                         (KeyCode::Char(c), _) if c != '\t' => {
                             buf.insert(cursor, c);
                             cursor += c.len_utf8();
+                            tab_state = None;
                         }
-                        _ => {}
+                        _ => { tab_state = None; }
                     }
                 }
                 // Bracketed paste — apps that enabled `\x1b[?2004h` get

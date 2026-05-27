@@ -7,6 +7,15 @@ pub fn fg(text: &str, color: u8) -> String {
     format!("\x1b[38;5;{}m{}\x1b[39m", color, text)
 }
 
+/// Wrap `text` so it renders in the terminal's native foreground —
+/// useful for emoji glyphs that would otherwise be tinted by an
+/// outer `fg(...)`. Emits `CSI 39` (default fg) before and after, so
+/// the glyph reaches the terminal without any palette override and
+/// glass's emoji-routing renders its colour-font form.
+pub fn native(text: &str) -> String {
+    format!("\x1b[39m{}\x1b[39m", text)
+}
+
 /// Apply foreground color from RGB hex string
 pub fn fg_rgb(text: &str, hex: &str) -> String {
     if let Some((r, g, b)) = parse_hex(hex) {
