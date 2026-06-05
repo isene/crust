@@ -282,9 +282,44 @@ fn is_glass_wide_bmp(cp: u32) -> bool {
 }
 
 /// Calculate visible display width of a string (excluding ANSI, handling Unicode)
+///
+/// `cell_width` is per-char and can't see a trailing presentation
+/// selector or ZWJ. Glass *can*: it does VS16 lookahead and assembles
+/// ZWJ runs, drawing the whole emoji grapheme as ONE 2-cell glyph
+/// (glass.asm `.vtp_zw_done`). So we collapse the same two cases here,
+/// or the count drifts from what glass paints and shifts table borders
+/// / padding on any row containing such an emoji:
+///   • `BASE + U+FE0F` (VS16) → 2 cells, even for a BMP base not in
+///     `is_glass_wide_bmp` (e.g. ✈ U+2708 → ✈️, counted 1 by cell_width).
+///   • `BASE [VS16] (ZWJ BASE [VS16])+` → 2 cells total, not once per
+///     component (families/professions, 🐻‍❄️ would otherwise count 4–6).
+/// Plain text pays nothing extra: the peek caches the next char that
+/// `next()` would decode anyway, so each char is still decoded once.
 pub fn display_width(s: &str) -> usize {
     let stripped = strip_ansi(s);
-    stripped.chars().map(cell_width).sum()
+    let mut width = 0usize;
+    let mut chars = stripped.chars().peekable();
+    while let Some(c) = chars.next() {
+        let mut w = cell_width(c);
+        // VS16 right after the base forces the wide emoji form in glass.
+        if chars.peek() == Some(&'\u{FE0F}') {
+            w = 2;
+            chars.next();
+        }
+        // Absorb a ZWJ run so the whole cluster counts as one 2-cell glyph.
+        while chars.peek() == Some(&'\u{200D}') {
+            w = 2;
+            chars.next(); // ZWJ
+            if chars.next().is_none() {
+                break; // joined base (dangling ZWJ at end — stop)
+            }
+            if chars.peek() == Some(&'\u{FE0F}') {
+                chars.next(); // its VS16
+            }
+        }
+        width += w;
+    }
+    width
 }
 
 /// Truncate a string to max_width visible characters, preserving ANSI codes.
