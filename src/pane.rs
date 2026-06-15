@@ -919,9 +919,9 @@ impl Pane {
 /// other escape sequence (cursor moves, erases, scrolls, other OSC) and all
 /// C0 control characters.
 fn sanitize_content(s: &str) -> String {
-    // Fast path: plain text with no ESC and no stray control chars is common
-    // (uncoloured lists, file contents) — leave it untouched.
-    if !s.bytes().any(|b| b == 0x1b || b == 0x7f || (b < 0x20 && b != b'\n' && b != b'\t')) {
+    // Fast path: pure printable ASCII (plus \n, \t) is the common case and
+    // can't contain any escape sequence or invisible format char.
+    if s.bytes().all(|b| matches!(b, 0x20..=0x7e | b'\n' | b'\t')) {
         return s.to_string();
     }
     let mut out = String::with_capacity(s.len());
@@ -967,6 +967,11 @@ fn sanitize_content(s: &str) -> String {
             },
             '\n' | '\t' => out.push(c),
             c if (c as u32) < 0x20 || c == '\x7f' => {} // drop other C0 controls
+            // Invisible / zero-width format chars that desync terminal cell
+            // counts and break pane borders (SHY, CGJ, ZWSP, ZWNJ, WJ, BOM).
+            // ZWJ (U+200D) is deliberately kept — display_width uses it to
+            // fold emoji sequences into one wide glyph.
+            '\u{00ad}' | '\u{034f}' | '\u{200b}' | '\u{200c}' | '\u{2060}' | '\u{feff}' => {}
             c => out.push(c),
         }
     }
