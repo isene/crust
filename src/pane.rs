@@ -106,7 +106,7 @@ impl Pane {
     /// Apps that want to populate `history` outside an editline session
     /// should push to `pane.history` directly.
     pub fn set_text(&mut self, text: &str) {
-        self.text = text.to_string();
+        self.text = sanitize_content(text);
         self.line_count = None;
     }
 
@@ -909,6 +909,68 @@ impl Pane {
         print!("\x1b[0m");
         io::stdout().flush().ok();
     }
+}
+
+/// Neutralise control sequences in pane content so untrusted text — e.g. a
+/// preview of a binary file whose bytes happen to contain ESC sequences —
+/// cannot move the cursor, clear the screen, or otherwise corrupt the
+/// terminal and sibling panes. Keeps printable text, newlines, tabs, SGR
+/// colour codes (`ESC[…m`) and OSC 8 hyperlinks (`ESC]8;…`); drops every
+/// other escape sequence (cursor moves, erases, scrolls, other OSC) and all
+/// C0 control characters.
+fn sanitize_content(s: &str) -> String {
+    // Fast path: plain text with no ESC and no stray control chars is common
+    // (uncoloured lists, file contents) — leave it untouched.
+    if !s.bytes().any(|b| b == 0x1b || b == 0x7f || (b < 0x20 && b != b'\n' && b != b'\t')) {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\x1b' => match chars.peek() {
+                Some('[') => {
+                    chars.next();
+                    // CSI: collect params until a final byte (0x40..=0x7e).
+                    let mut seq = String::from("\x1b[");
+                    let mut final_byte = None;
+                    while let Some(&pc) = chars.peek() {
+                        chars.next();
+                        seq.push(pc);
+                        if ('\x40'..='\x7e').contains(&pc) { final_byte = Some(pc); break; }
+                    }
+                    // Keep only SGR (colours/attrs); drop cursor moves, erases, …
+                    if final_byte == Some('m') { out.push_str(&seq); }
+                }
+                Some(']') => {
+                    chars.next();
+                    // OSC: body until BEL or ST (ESC\). Keep only OSC 8 links.
+                    let mut body = String::new();
+                    let mut st = false;
+                    while let Some(&pc) = chars.peek() {
+                        chars.next();
+                        if pc == '\x07' { break; }
+                        if pc == '\x1b' {
+                            if chars.peek() == Some(&'\\') { chars.next(); st = true; }
+                            break;
+                        }
+                        body.push(pc);
+                    }
+                    if body.starts_with("8;") {
+                        out.push_str("\x1b]");
+                        out.push_str(&body);
+                        if st { out.push_str("\x1b\\"); } else { out.push('\x07'); }
+                    }
+                }
+                // Lone ESC or a two-character escape: drop both.
+                _ => { chars.next(); }
+            },
+            '\n' | '\t' => out.push(c),
+            c if (c as u32) < 0x20 || c == '\x7f' => {} // drop other C0 controls
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Check if a string contains ANSI background color sequences (48;5;N or 48;2;R;G;B).
