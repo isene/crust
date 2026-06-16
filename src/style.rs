@@ -126,6 +126,19 @@ pub fn coded(text: &str, spec: &str) -> String {
     }
 }
 
+/// Truecolor (24-bit) sibling of `coded`: optional (r,g,b) fg/bg. Terminates
+/// with a full reset (`\x1b[0m`) so a host pane restores its own colors after.
+pub fn coded_rgb(text: &str, fg: Option<(u8, u8, u8)>, bg: Option<(u8, u8, u8)>) -> String {
+    let mut codes = Vec::new();
+    if let Some((r, g, b)) = fg { codes.push(format!("38;2;{};{};{}", r, g, b)); }
+    if let Some((r, g, b)) = bg { codes.push(format!("48;2;{};{};{}", r, g, b)); }
+    if codes.is_empty() {
+        text.to_string()
+    } else {
+        format!("\x1b[{}m{}\x1b[0m", codes.join(";"), text)
+    }
+}
+
 /// Parse hex color string ("#RRGGBB" or "#RGB") to (r, g, b)
 pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
     let hex = hex.trim_start_matches('#');
