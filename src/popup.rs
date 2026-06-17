@@ -3,7 +3,6 @@
 //! A centered (or positioned) pane that overlays content with keyboard navigation.
 
 use crate::{Pane, Input};
-use crate::pane::Align;
 
 pub struct Popup {
     pub pane: Pane,

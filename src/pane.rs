@@ -514,11 +514,8 @@ impl Pane {
     /// Single-line editor with history support
     pub fn editline(&mut self) -> String {
         use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-        use crossterm::terminal;
 
         let (cx, cy, cw, _) = self.content_area();
-        let prompt_w = display_width(&self.prompt);
-        let edit_w = (cw as usize).saturating_sub(prompt_w);
 
         let mut buf = self.text.clone();
         let mut cursor = buf.len();
