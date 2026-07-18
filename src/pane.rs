@@ -530,7 +530,7 @@ impl Pane {
         // Draw prompt + initial text
         let redraw = |buf: &str, cursor: usize, prompt: &str, cx: u16, cy: u16, cw: u16, fg: u16, bg: u16, secret: bool| {
             let prompt_w = display_width(prompt);
-            let edit_w = (cw as usize).saturating_sub(prompt_w);
+            let edit_w = (cw as usize).saturating_sub(prompt_w).max(1);
             // Source for visible rendering: real chars unless secret
             // mode, in which case substitute each char with U+2022 so
             // the password isn't shown. Slicing happens in char space
@@ -540,26 +540,33 @@ impl Pane {
             } else {
                 buf.to_string()
             };
-            let visible: String = if source.chars().count() > edit_w {
-                source.chars().skip(source.chars().count() - edit_w).collect()
-            } else {
-                source
-            };
+            let total_chars = source.chars().count();
+            // Cursor position in CHAR space (secret bullets map 1:1).
+            let safe_cursor = cursor.min(buf.len());
+            let cursor_chars = if buf.is_char_boundary(safe_cursor) {
+                buf[..safe_cursor].chars().count()
+            } else { 0 };
+            // Horizontal window that KEEPS THE CURSOR IN VIEW. When the
+            // text overflows the field, slide the window so the cursor
+            // sits at its right edge — with one spare column reserved so
+            // the end-of-line cursor has a cell of its own (you can always
+            // append or Backspace the final char). The old code always
+            // rendered the TAIL of the buffer while positioning the
+            // terminal cursor by the cursor's FULL prefix width — with the
+            // cursor mid-string the two desynced (the cursor clamped at
+            // the bar's edge) and typed characters landed somewhere other
+            // than where the cursor appeared to be.
+            let win = edit_window(total_chars, cursor_chars, edit_w);
+            let visible: String = source.chars().skip(win).take(edit_w).collect();
             let pad = " ".repeat(edit_w.saturating_sub(display_width(&visible)));
             print!("\x1b[{};{}H\x1b[48;5;{}m\x1b[38;5;{}m{}{}{}\x1b[0m",
                 cy, cx, bg, fg, prompt, visible, pad);
-            // Position cursor by display width of the chars before it.
-            // In secret mode every char is one column wide (•), so
-            // count chars instead of measuring the real (hidden) text.
-            let safe_cursor = cursor.min(buf.len());
-            let cursor_w = if secret {
-                buf[..safe_cursor].chars().count()
-            } else {
-                let prefix = if buf.is_char_boundary(safe_cursor) {
-                    &buf[..safe_cursor]
-                } else { "" };
-                display_width(prefix)
-            };
+            // Terminal cursor = prompt + display width of the visible
+            // chars BETWEEN the window start and the cursor, clamped to
+            // the field so it can never wander past the pane.
+            let in_win: String = source.chars().skip(win)
+                .take(cursor_chars.saturating_sub(win)).collect();
+            let cursor_w = display_width(&in_win).min(edit_w);
             let cursor_col = cx + prompt_w as u16 + cursor_w as u16;
             print!("\x1b[{};{}H", cy, cursor_col);
             io::stdout().flush().ok();
@@ -1080,4 +1087,61 @@ fn strip_ansi_bg(s: &str) -> String {
         }
     }
     result
+}
+
+/// Editline horizontal-window start (in chars): keeps the cursor visible,
+/// reserving one column at the field's right edge so the end-of-line
+/// cursor always has a cell of its own — you can append to, or Backspace
+/// the last char of, an overflown line. Pure so it's testable.
+fn edit_window(total_chars: usize, cursor_chars: usize, edit_w: usize) -> usize {
+    if total_chars <= edit_w { 0 }
+    else { cursor_chars.saturating_sub(edit_w.saturating_sub(1)) }
+}
+
+#[cfg(test)]
+mod edit_window_tests {
+    use super::edit_window;
+
+    // Simulate what redraw derives from the window for ASCII input:
+    // (visible char count, cursor column offset within the field).
+    fn view(total: usize, cursor: usize, w: usize) -> (usize, usize) {
+        let win = edit_window(total, cursor, w);
+        let visible = total.saturating_sub(win).min(w);
+        let cursor_off = cursor.saturating_sub(win).min(w);
+        (visible, cursor_off)
+    }
+
+    #[test]
+    fn cursor_at_end_of_overflown_line_has_its_own_column() {
+        // 100-char note in a 20-col field, cursor at the very end:
+        // 19 chars visible + the cursor on the spare 20th column,
+        // one PAST the last char — so typing appends and Backspace
+        // eats the true last char.
+        let (visible, cursor_off) = view(100, 100, 20);
+        assert_eq!(visible, 19);
+        assert_eq!(cursor_off, 19); // rightmost field column, on the pad
+
+        // Backspace: buffer shrinks by one, cursor still at end —
+        // the invariant must hold at every length on the way down.
+        for len in (21..100).rev() {
+            let (v, c) = view(len, len, 20);
+            assert_eq!((v, c), (19, 19), "len {}", len);
+        }
+    }
+
+    #[test]
+    fn cursor_mid_string_stays_inside_the_window() {
+        for cursor in 0..=100 {
+            let win = edit_window(100, cursor, 20);
+            assert!(cursor >= win, "cursor {} left of window {}", cursor, win);
+            assert!(cursor - win <= 19, "cursor {} beyond field (win {})", cursor, win);
+        }
+    }
+
+    #[test]
+    fn short_line_never_scrolls() {
+        for cursor in 0..=10 {
+            assert_eq!(edit_window(10, cursor, 20), 0);
+        }
+    }
 }

@@ -28,6 +28,32 @@ impl Popup {
         Self { pane }
     }
 
+    /// Show the popup as a read-only VIEWER: Up/Down (and k/j) scroll the
+    /// content one line at a time, PgUp/PgDn/SPACE page, g/G jump to the
+    /// edges. Any of ESC / q / ENTER closes. Use this for help screens and
+    /// long texts — `modal` moves a selection index instead, which looks
+    /// inert on non-menu content until the cursor walks off-screen.
+    pub fn view(&mut self, content: &str) {
+        self.pane.set_text(content);
+        self.pane.ix = 0;
+        self.pane.border_refresh();
+        self.pane.refresh();
+        loop {
+            if let Some(key) = Input::getchr(None) {
+                match key.as_str() {
+                    "ESC" | "q" | "ENTER" => return,
+                    "UP" | "k" => { self.pane.lineup(); }
+                    "DOWN" | "j" => { self.pane.linedown(); }
+                    "PgDOWN" | " " => self.pane.pagedown(),
+                    "PgUP" | "b" => self.pane.pageup(),
+                    "HOME" | "g" => self.pane.top(),
+                    "END" | "G" => self.pane.bottom(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
     /// Show the popup with content, return selected line index on Enter, None on ESC
     pub fn modal(&mut self, content: &str) -> Option<usize> {
         self.pane.set_text(content);
