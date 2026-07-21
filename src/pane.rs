@@ -246,14 +246,13 @@ impl Pane {
 
     /// Force complete repaint (clears diff cache, redraws border)
     pub fn full_refresh(&mut self) {
+        // No separate blank pass: refresh() with an empty diff cache
+        // rewrites EVERY row padded to the full content width, so a
+        // pre-clear only doubles the output — and worse, stdout's line
+        // buffer flushes mid-sequence on big panes, so the terminal
+        // briefly renders the blanked pane (a visible hard blink on
+        // every full_refresh). Single-pass repaint, no blank frame.
         self.prev_frame.clear();
-        // Clear the entire pane area first to prevent color artifacts from old content
-        let (cx, cy, cw, ch) = self.content_area();
-        let bg_code = format!("\x1b[48;5;{}m", self.bg);
-        let blank = " ".repeat(cw as usize);
-        for row in 0..ch {
-            print!("\x1b[{};{}H{}{}\x1b[0m", cy + row, cx, bg_code, blank);
-        }
         if self.border {
             self.draw_border();
         }
