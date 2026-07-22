@@ -297,29 +297,80 @@ fn is_glass_wide_bmp(cp: u32) -> bool {
 /// `next()` would decode anyway, so each char is still decoded once.
 pub fn display_width(s: &str) -> usize {
     let stripped = strip_ansi(s);
-    let mut width = 0usize;
-    let mut chars = stripped.chars().peekable();
-    while let Some(c) = chars.next() {
-        let mut w = cell_width(c);
-        // VS16 right after the base forces the wide emoji form in glass.
-        if chars.peek() == Some(&'\u{FE0F}') {
-            w = 2;
-            chars.next();
-        }
-        // Absorb a ZWJ run so the whole cluster counts as one 2-cell glyph.
-        while chars.peek() == Some(&'\u{200D}') {
-            w = 2;
-            chars.next(); // ZWJ
-            if chars.next().is_none() {
-                break; // joined base (dangling ZWJ at end — stop)
-            }
-            if chars.peek() == Some(&'\u{FE0F}') {
-                chars.next(); // its VS16
-            }
-        }
-        width += w;
+    let mut walker = WidthWalker::new();
+    stripped.chars().map(|c| walker.push(c)).sum()
+}
+
+/// Streaming counterpart of `display_width`: feed chars one at a time,
+/// get back the cells each char ADDS. Applies the same VS16/ZWJ cluster
+/// collapsing, so per-char walkers (wrap and cursor math in apps) stay
+/// in sync with `display_width`'s totals. `display_width` itself is
+/// built on this, making it the single width authority.
+///
+/// Apps that walk chars for cursor/wrap math must use this instead of
+/// `cell_width(c)` per char: a lone `cell_width` can't see that a VS16
+/// upgrades its base to 2 cells or that a ZWJ run renders as ONE glyph.
+#[derive(Default)]
+pub struct WidthWalker {
+    cluster_w: usize,  // cells reported so far for the open cluster
+    open: bool,        // a base char has started a cluster
+    zwj_pending: bool, // last char was ZWJ — next char joins for free
+}
+
+impl WidthWalker {
+    pub fn new() -> Self {
+        Self::default()
     }
-    width
+
+    /// True if `c` would extend the current cluster rather than start a
+    /// glyph of its own. Call BEFORE `push` — wrap logic must never
+    /// break a line on a continuation char.
+    pub fn is_continuation(&self, c: char) -> bool {
+        self.zwj_pending || (self.open && (c == '\u{FE0F}' || c == '\u{200D}'))
+    }
+
+    /// Cells `c` adds on top of what the cluster already counted.
+    pub fn push(&mut self, c: char) -> usize {
+        if self.zwj_pending {
+            // Joined base — already paid for by the ZWJ upgrade.
+            self.zwj_pending = false;
+            return 0;
+        }
+        match c {
+            // VS16 forces the emoji form: the whole cluster becomes 2.
+            '\u{FE0F}' if self.open => {
+                let add = 2usize.saturating_sub(self.cluster_w);
+                self.cluster_w = 2;
+                add
+            }
+            // ZWJ: the joined run renders as one 2-cell glyph.
+            '\u{200D}' if self.open => {
+                let add = 2usize.saturating_sub(self.cluster_w);
+                self.cluster_w = 2;
+                self.zwj_pending = true;
+                add
+            }
+            _ => {
+                let w = cell_width(c);
+                self.cluster_w = w;
+                self.open = true;
+                w
+            }
+        }
+    }
+}
+
+/// Left-align `s` in `width` cells, padding with spaces by DISPLAY
+/// width (ANSI- and emoji-aware). `format!("{:<w$}", s)` pads by char
+/// count, which drifts one cell for every VS16-carrying emoji (2 chars,
+/// 2 cells) — use this wherever glyphs can appear.
+pub fn pad_display(s: &str, width: usize) -> String {
+    let w = display_width(s);
+    if w >= width {
+        s.to_string()
+    } else {
+        format!("{}{}", s, " ".repeat(width - w))
+    }
 }
 
 /// Truncate a string to max_width visible characters, preserving ANSI codes.
@@ -418,4 +469,40 @@ pub fn truncate_ansi(s: &str, max_width: usize) -> String {
     // Close with reset to prevent color bleeding
     result.push_str("\x1b[0m");
     result
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::*;
+
+    #[test]
+    fn vs16_upgrades_narrow_base() {
+        assert_eq!(display_width("✏️"), 2); // U+270F + VS16
+        assert_eq!(display_width("⛏️"), 2); // U+26CF + VS16
+        assert_eq!(display_width("🗝️"), 2); // non-BMP + VS16 (already wide)
+        assert_eq!(display_width("🔒"), 2); // plain wide, no VS16
+    }
+
+    #[test]
+    fn zwj_run_is_one_glyph() {
+        assert_eq!(display_width("👨‍👩‍👧"), 2);
+        assert_eq!(display_width("🐻‍❄️"), 2);
+    }
+
+    #[test]
+    fn walker_matches_display_width() {
+        for s in ["✏️x", "a⛏️b", "🔒🔓", "👨‍👩‍👧 fam", "plain text"] {
+            let mut w = WidthWalker::new();
+            let total: usize = s.chars().map(|c| w.push(c)).sum();
+            assert_eq!(total, display_width(s), "mismatch for {s:?}");
+        }
+    }
+
+    #[test]
+    fn pad_display_pads_by_cells() {
+        // Both are 2 cells → identical padded width, regardless of
+        // char count (✏️ is 2 chars, 🔒 is 1).
+        assert_eq!(display_width(&pad_display("✏️", 4)), 4);
+        assert_eq!(display_width(&pad_display("🔒", 4)), 4);
+    }
 }
