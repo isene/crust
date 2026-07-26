@@ -185,6 +185,10 @@ pub fn rgb(text: &str, fg: Option<(u8, u8, u8)>, bg: Option<(u8, u8, u8)>, attrs
 /// A bare SGR reset, for callers assembling their own spans.
 pub const RESET: &str = "\x1b[0m";
 
+/// Bare attribute setters, for spans the caller closes itself.
+pub const DIM: &str = "\x1b[2m";
+pub const BOLD: &str = "\x1b[1m";
+
 /// An OSC 8 hyperlink: `label` becomes clickable, pointing at `url`.
 ///
 /// Wrap the label yourself for styling — `hyperlink(url, &underline(text))`
