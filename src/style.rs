@@ -207,6 +207,11 @@ pub fn hyperlink(url: &str, label: &str) -> String {
 /// `LS_COLORS` entries like `38;5;12` or `01;34`, a theme file, a
 /// server response — into a usable escape. For colors the program picks
 /// itself, use the typed helpers above instead.
+/// OSC 0 window-title sequence, as a String to embed in a prompt.
+pub fn title_seq(title: &str) -> String {
+    format!("\x1b]0;{title}\x07")
+}
+
 pub fn sgr(spec: &str) -> String {
     format!("\x1b[{spec}m")
 }
