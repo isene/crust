@@ -125,6 +125,13 @@ impl Crust {
         let _ = crossterm::execute!(io::stdout(), PopKeyboardEnhancementFlags);
     }
 
+    /// Tell the terminal the shell's working directory (OSC 7), so it
+    /// can open new tabs in the same place. `host` may be empty.
+    pub fn set_cwd(host: &str, path: &str) {
+        print!("\x1b]7;file://{host}{path}\x1b\\");
+        io::stdout().flush().ok();
+    }
+
     /// Bracketed paste on: pasted text arrives as one `Input::getchr`
     /// event (`"PASTE\0<text>"`) instead of a burst of keystrokes.
     pub fn enable_bracketed_paste() {

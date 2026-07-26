@@ -17,6 +17,21 @@ pub mod seq {
     pub const HIDE: &str = "\x1b[?25l";
     pub const SHOW: &str = "\x1b[?25h";
     pub const LINE_START: &str = "\x1b[G";
+    pub const ERASE_ALL: &str = "\x1b[2J";
+
+    /// Relative moves, as sequences to compose into a frame.
+    pub fn up(n: u16) -> String {
+        format!("\x1b[{n}A")
+    }
+    pub fn down(n: u16) -> String {
+        format!("\x1b[{n}B")
+    }
+    pub fn right(n: u16) -> String {
+        format!("\x1b[{n}C")
+    }
+    pub fn left(n: u16) -> String {
+        format!("\x1b[{n}D")
+    }
 }
 
 pub struct Cursor;
