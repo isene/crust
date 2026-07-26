@@ -2,10 +2,19 @@
 //!
 //! A centered (or positioned) pane that overlays content with keyboard navigation.
 
-use crate::{Pane, Input};
+use crate::{style, Input, Pane};
 
 pub struct Popup {
     pub pane: Pane,
+}
+
+/// One row drawn as the selection bar. Reverse video is re-armed after
+/// every reset inside the row, so an item carrying its own colors does
+/// not drop the bar half way across.
+fn select_bar(line: &str, width: usize) -> String {
+    let body = line.replace(style::RESET, &format!("{}{}", style::RESET, style::REVERSE));
+    let pad = width.saturating_sub(crate::display_width(line));
+    format!("{}{body}{}{}", style::REVERSE, " ".repeat(pad), style::RESET)
 }
 
 impl Popup {
@@ -54,48 +63,66 @@ impl Popup {
         }
     }
 
-    /// Show the popup with content, return selected line index on Enter, None on ESC
+    /// Show the popup as a MENU: one line per item, the current one drawn
+    /// as a selection bar that Up/Down (and k/j) moves. ENTER returns its
+    /// index, ESC or q returns None. Set `pane.index` before calling to
+    /// open on a given item. For read-only text use `view` instead — a
+    /// selection bar on a help screen is noise.
     pub fn modal(&mut self, content: &str) -> Option<usize> {
-        self.pane.set_text(content);
-        self.pane.ix = 0;
-        self.pane.index = 0;
+        let items: Vec<String> = content.split('\n').map(str::to_string).collect();
+        let last = items.len().saturating_sub(1);
+        // One item per row: a wrapped item would break the 1:1 mapping
+        // between what the bar sits on and what ENTER returns.
+        self.pane.wrap = false;
+        self.pane.index = self.pane.index.min(last);
         self.pane.border_refresh();
-        self.pane.refresh();
+        self.render(&items);
 
         loop {
-            if let Some(key) = Input::getchr(None) {
-                match key.as_str() {
-                    "ESC" | "q" => return None,
-                    "ENTER" => return Some(self.pane.index),
-                    "UP" | "k" => {
-                        if self.pane.index > 0 {
-                            self.pane.index -= 1;
-                            // Auto-scroll
-                            if self.pane.index < self.pane.ix {
-                                self.pane.ix = self.pane.index;
-                            }
-                            self.pane.refresh();
-                        }
-                    }
-                    "DOWN" | "j" => {
-                        let lc = self.pane.line_count();
-                        if self.pane.index < lc.saturating_sub(1) {
-                            self.pane.index += 1;
-                            let visible = self.pane.h as usize;
-                            if self.pane.index >= self.pane.ix + visible {
-                                self.pane.ix = self.pane.index - visible + 1;
-                            }
-                            self.pane.refresh();
-                        }
-                    }
-                    "PgDOWN" | " " => self.pane.pagedown(),
-                    "PgUP" => self.pane.pageup(),
-                    "HOME" | "g" => self.pane.top(),
-                    "END" | "G" => self.pane.bottom(),
-                    _ => {}
-                }
+            let key = match Input::getchr(None) {
+                Some(k) => k,
+                None => continue,
+            };
+            let page = (self.pane.h as usize).max(1);
+            match key.as_str() {
+                "ESC" | "q" => return None,
+                "ENTER" => return Some(self.pane.index),
+                "UP" | "k" => self.pane.index = self.pane.index.saturating_sub(1),
+                "DOWN" | "j" => self.pane.index = (self.pane.index + 1).min(last),
+                "PgUP" | "b" => self.pane.index = self.pane.index.saturating_sub(page),
+                "PgDOWN" | " " => self.pane.index = (self.pane.index + page).min(last),
+                "HOME" | "g" => self.pane.index = 0,
+                "END" | "G" => self.pane.index = last,
+                _ => continue,
             }
+            self.render(&items);
         }
+    }
+
+    /// Draw the items with the current one highlighted, scrolling only as
+    /// far as it takes to keep the selection on screen.
+    fn render(&mut self, items: &[String]) {
+        let h = (self.pane.h as usize).max(1);
+        if self.pane.index < self.pane.ix {
+            self.pane.ix = self.pane.index;
+        } else if self.pane.index >= self.pane.ix + h {
+            self.pane.ix = self.pane.index + 1 - h;
+        }
+        let w = self.pane.w as usize;
+        let rows: Vec<String> = items
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let line = crate::truncate_ansi(l, w);
+                if i == self.pane.index {
+                    select_bar(&line, w)
+                } else {
+                    line
+                }
+            })
+            .collect();
+        self.pane.set_text(&rows.join("\n"));
+        self.pane.refresh();
     }
 
     /// Show the popup (non-blocking, for manual control)

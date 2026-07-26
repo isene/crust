@@ -188,6 +188,7 @@ pub const RESET: &str = "\x1b[0m";
 /// Bare attribute setters, for spans the caller closes itself.
 pub const DIM: &str = "\x1b[2m";
 pub const BOLD: &str = "\x1b[1m";
+pub const REVERSE: &str = "\x1b[7m";
 
 /// An OSC 8 hyperlink: `label` becomes clickable, pointing at `url`.
 ///
