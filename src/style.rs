@@ -199,6 +199,17 @@ pub const BOLD: &str = "\x1b[1m";
 /// URL-matching pass will otherwise find the URL *inside* this escape and
 /// nest a second link, which kitty and glass resolve by eating the rest
 /// of the line.
+/// The two halves of an OSC 8 link, for streaming writers that emit the
+/// opener, then arbitrary styled runs, then the closer. Prefer
+/// `hyperlink` when the label is a single string.
+pub fn hyperlink_open(url: &str) -> String {
+    format!("\x1b]8;;{url}\x1b\\")
+}
+
+pub fn hyperlink_close() -> String {
+    "\x1b]8;;\x1b\\".to_string()
+}
+
 pub fn hyperlink(url: &str, label: &str) -> String {
     format!("\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\")
 }
