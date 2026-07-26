@@ -199,6 +199,14 @@ pub fn hyperlink(url: &str, label: &str) -> String {
     format!("\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\")
 }
 
+/// Wrap an SGR parameter string that came from OUTSIDE the program —
+/// `LS_COLORS` entries like `38;5;12` or `01;34`, a theme file, a
+/// server response — into a usable escape. For colors the program picks
+/// itself, use the typed helpers above instead.
+pub fn sgr(spec: &str) -> String {
+    format!("\x1b[{spec}m")
+}
+
 /// Just the "switch foreground to this 256-color" sequence, with no
 /// reset. For inline switches inside a longer styled run, where a reset
 /// would drop the background or attributes the caller set around it.
