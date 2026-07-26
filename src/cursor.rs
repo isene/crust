@@ -2,6 +2,23 @@
 
 use std::io::{self, Write};
 
+/// The fixed control sequences, as constants.
+///
+/// Use these when composing a frame in a String — especially in a hot
+/// path like a shell prompt redraw, where a helper returning an owned
+/// String would allocate on every keystroke for no reason.
+pub mod seq {
+    pub const ERASE_EOL: &str = "\x1b[K";
+    pub const ERASE_LINE: &str = "\x1b[2K";
+    pub const ERASE_BELOW: &str = "\x1b[J";
+    pub const HOME: &str = "\x1b[H";
+    pub const SAVE: &str = "\x1b[s";
+    pub const RESTORE: &str = "\x1b[u";
+    pub const HIDE: &str = "\x1b[?25l";
+    pub const SHOW: &str = "\x1b[?25h";
+    pub const LINE_START: &str = "\x1b[G";
+}
+
 pub struct Cursor;
 
 impl Cursor {
@@ -21,15 +38,16 @@ impl Cursor {
 
     /// `clear_line` as a String, for the same frame-assembly use.
     pub fn erase_line() -> String {
-        "\x1b[2K".to_string()
+        seq::ERASE_LINE.to_string()
     }
 
-    /// `hide` / `show` as Strings, for frame assembly.
+    /// `hide` / `show` as Strings, for frame assembly. Prefer the
+    /// `seq::` constants where no owned String is needed.
     pub fn hide_seq() -> String {
-        "\x1b[?25l".to_string()
+        seq::HIDE.to_string()
     }
     pub fn show_seq() -> String {
-        "\x1b[?25h".to_string()
+        seq::SHOW.to_string()
     }
 
     /// Move to specific row

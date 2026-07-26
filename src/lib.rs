@@ -28,6 +28,7 @@ pub mod text;
 pub use pane::Pane;
 pub use popup::Popup;
 pub use input::Input;
+pub use cursor::seq;
 pub use cursor::Cursor;
 
 use crossterm::terminal;
