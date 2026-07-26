@@ -185,6 +185,38 @@ pub fn rgb(text: &str, fg: Option<(u8, u8, u8)>, bg: Option<(u8, u8, u8)>, attrs
 /// A bare SGR reset, for callers assembling their own spans.
 pub const RESET: &str = "\x1b[0m";
 
+/// An OSC 8 hyperlink: `label` becomes clickable, pointing at `url`.
+///
+/// Wrap the label yourself for styling — `hyperlink(url, &underline(text))`
+/// — so this stays one concern. The link is closed with an empty OSC 8,
+/// which is what stops terminals underlining the rest of the line.
+///
+/// Note for multi-stage renderers: only ONE stage may emit OSC 8. A later
+/// URL-matching pass will otherwise find the URL *inside* this escape and
+/// nest a second link, which kitty and glass resolve by eating the rest
+/// of the line.
+pub fn hyperlink(url: &str, label: &str) -> String {
+    format!("\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\")
+}
+
+/// Just the "switch foreground to this 256-color" sequence, with no
+/// reset. For inline switches inside a longer styled run, where a reset
+/// would drop the background or attributes the caller set around it.
+pub fn set_fg(color: u8) -> String {
+    format!("\x1b[38;5;{color}m")
+}
+
+/// Truecolor sibling of `set_fg`.
+pub fn set_fg_rgb(r: u8, g: u8, b: u8) -> String {
+    format!("\x1b[38;2;{r};{g};{b}m")
+}
+
+/// Return the foreground to the terminal default (SGR 39), leaving
+/// background and attributes alone.
+pub fn reset_fg() -> String {
+    "\x1b[39m".to_string()
+}
+
 /// Parse hex color string ("#RRGGBB" or "#RGB") to (r, g, b)
 pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
     let hex = hex.trim_start_matches('#');
