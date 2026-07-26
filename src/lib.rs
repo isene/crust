@@ -123,6 +123,21 @@ impl Crust {
         use crossterm::event::PopKeyboardEnhancementFlags;
         let _ = crossterm::execute!(io::stdout(), PopKeyboardEnhancementFlags);
     }
+
+    /// Bracketed paste on: pasted text arrives as one `Input::getchr`
+    /// event (`"PASTE\0<text>"`) instead of a burst of keystrokes.
+    pub fn enable_bracketed_paste() {
+        use crossterm::event::EnableBracketedPaste;
+        let _ = crossterm::execute!(io::stdout(), EnableBracketedPaste);
+    }
+
+    /// Bracketed paste off. Hand the terminal back in its normal mode
+    /// before spawning a child that reads stdin itself (an editor, a
+    /// `claude` session), then re-enable it on return.
+    pub fn disable_bracketed_paste() {
+        use crossterm::event::DisableBracketedPaste;
+        let _ = crossterm::execute!(io::stdout(), DisableBracketedPaste);
+    }
 }
 
 /// Base64 encode bytes (used by OSC 52 clipboard, Kitty protocol, etc.)
