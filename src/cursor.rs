@@ -11,6 +11,27 @@ impl Cursor {
         io::stdout().flush().ok();
     }
 
+    /// The positioning sequence as a String, for callers that assemble a
+    /// whole frame in memory and write it in one go (a full-screen
+    /// redraw should be ONE write, not one per cell). Same convention as
+    /// `set`: 1-indexed (col, row).
+    pub fn at(col: u16, row: u16) -> String {
+        format!("\x1b[{};{}H", row, col)
+    }
+
+    /// `clear_line` as a String, for the same frame-assembly use.
+    pub fn erase_line() -> String {
+        "\x1b[2K".to_string()
+    }
+
+    /// `hide` / `show` as Strings, for frame assembly.
+    pub fn hide_seq() -> String {
+        "\x1b[?25l".to_string()
+    }
+    pub fn show_seq() -> String {
+        "\x1b[?25h".to_string()
+    }
+
     /// Move to specific row
     pub fn row(r: u16) {
         let (_, c) = Self::pos();

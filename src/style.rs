@@ -49,6 +49,13 @@ pub fn bold(text: &str) -> String {
     format!("\x1b[1m{}\x1b[22m", text)
 }
 
+/// Dim / faint. Resets only bold+faint (SGR 22), so surrounding color
+/// survives. This is the single most common attribute in the suite's
+/// label/value panels, and every app used to hand-roll it.
+pub fn dim(text: &str) -> String {
+    format!("\x1b[2m{}\x1b[22m", text)
+}
+
 /// Italic. Resets only italic (SGR 23).
 pub fn italic(text: &str) -> String {
     format!("\x1b[3m{}\x1b[23m", text)
@@ -138,6 +145,45 @@ pub fn coded_rgb(text: &str, fg: Option<(u8, u8, u8)>, bg: Option<(u8, u8, u8)>)
         format!("\x1b[{}m{}\x1b[0m", codes.join(";"), text)
     }
 }
+
+/// Truecolor with attributes, in ONE escape sequence.
+///
+/// The 24-bit counterpart of `styled`: optional (r,g,b) foreground and
+/// background plus any of `b` bold, `d` dim, `i` italic, `u` underline,
+/// `l` blink, `r` reverse. Terminates with a full reset so a host pane
+/// restores its own colors afterwards.
+///
+/// Use this instead of writing `\x1b[1;38;2;…m` by hand: nesting
+/// `bold(coded_rgb(…))` works but emits two sequences per span, and the
+/// inner reset silently cancels the outer attribute on some terminals.
+pub fn rgb(text: &str, fg: Option<(u8, u8, u8)>, bg: Option<(u8, u8, u8)>, attrs: &str) -> String {
+    let mut codes = Vec::new();
+    for ch in attrs.chars() {
+        match ch {
+            'b' => codes.push("1".to_string()),
+            'd' => codes.push("2".to_string()),
+            'i' => codes.push("3".to_string()),
+            'u' => codes.push("4".to_string()),
+            'l' => codes.push("5".to_string()),
+            'r' => codes.push("7".to_string()),
+            _ => {}
+        }
+    }
+    if let Some((r, g, b)) = fg {
+        codes.push(format!("38;2;{r};{g};{b}"));
+    }
+    if let Some((r, g, b)) = bg {
+        codes.push(format!("48;2;{r};{g};{b}"));
+    }
+    if codes.is_empty() {
+        text.to_string()
+    } else {
+        format!("\x1b[{}m{}\x1b[0m", codes.join(";"), text)
+    }
+}
+
+/// A bare SGR reset, for callers assembling their own spans.
+pub const RESET: &str = "\x1b[0m";
 
 /// Parse hex color string ("#RRGGBB" or "#RGB") to (r, g, b)
 pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
