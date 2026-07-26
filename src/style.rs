@@ -219,6 +219,21 @@ pub fn set_fg_rgb(r: u8, g: u8, b: u8) -> String {
     format!("\x1b[38;2;{r};{g};{b}m")
 }
 
+/// Background counterpart of `set_fg`.
+pub fn set_bg(color: u8) -> String {
+    format!("\x1b[48;5;{color}m")
+}
+
+/// Truecolor sibling of `set_bg`.
+pub fn set_bg_rgb(r: u8, g: u8, b: u8) -> String {
+    format!("\x1b[48;2;{r};{g};{b}m")
+}
+
+/// Return the background to the terminal default (SGR 49).
+pub fn reset_bg() -> String {
+    "\x1b[49m".to_string()
+}
+
 /// Return the foreground to the terminal default (SGR 39), leaving
 /// background and attributes alone.
 pub fn reset_fg() -> String {
