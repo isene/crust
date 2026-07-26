@@ -255,3 +255,228 @@ fn split_pipe_row(line: &str) -> Vec<String> {
 fn display_width_cell(s: &str) -> usize {
     crate::display_width(s)
 }
+
+// ── Wikipedia extract cleanup ────────────────────────────────────────
+//
+// Shared by the suite's article readers (elements, stars, particles).
+// The TextExtracts API renders every <math> element as a stack of
+// indented lines — one glyph per line — followed by a `{\displaystyle …}`
+// annotation, and leaves empty parentheses wherever it dropped a
+// pronunciation template. Both read as corruption in a terminal pane.
+
+/// LaTeX commands worth a real character.
+const TEX_SYMBOLS: &[(&str, &str)] = &[
+    ("\\hbar", "ℏ"), ("\\varepsilon", "ε"), ("\\epsilon", "ε"), ("\\vartheta", "θ"),
+    ("\\alpha", "α"), ("\\beta", "β"), ("\\gamma", "γ"), ("\\delta", "δ"),
+    ("\\zeta", "ζ"), ("\\eta", "η"), ("\\theta", "θ"), ("\\iota", "ι"),
+    ("\\kappa", "κ"), ("\\lambda", "λ"), ("\\mu", "μ"), ("\\nu", "ν"),
+    ("\\xi", "ξ"), ("\\pi", "π"), ("\\rho", "ρ"), ("\\sigma", "σ"),
+    ("\\tau", "τ"), ("\\upsilon", "υ"), ("\\phi", "φ"), ("\\chi", "χ"),
+    ("\\psi", "ψ"), ("\\omega", "ω"),
+    ("\\Gamma", "Γ"), ("\\Delta", "Δ"), ("\\Theta", "Θ"), ("\\Lambda", "Λ"),
+    ("\\Sigma", "Σ"), ("\\Phi", "Φ"), ("\\Psi", "Ψ"), ("\\Omega", "Ω"),
+    ("\\times", "×"), ("\\cdot", "·"), ("\\pm", "±"), ("\\mp", "∓"),
+    ("\\rightarrow", "→"), ("\\leftarrow", "←"), ("\\to", "→"),
+    ("\\approx", "≈"), ("\\equiv", "≡"), ("\\neq", "≠"), ("\\leq", "≤"),
+    ("\\geq", "≥"), ("\\ll", "≪"), ("\\gg", "≫"), ("\\propto", "∝"),
+    ("\\infty", "∞"), ("\\partial", "∂"), ("\\nabla", "∇"),
+    ("\\sum", "Σ"), ("\\prod", "Π"), ("\\int", "∫"), ("\\pm", "±"),
+    ("\\langle", "⟨"), ("\\rangle", "⟩"), ("\\dagger", "†"), ("\\ast", "*"),
+];
+
+/// Commands that carry no meaning once the formula is one line of text.
+const TEX_NOISE: &[&str] = &[
+    "\\displaystyle", "\\textstyle", "\\operatorname", "\\mathrm", "\\mathbf",
+    "\\mathbb", "\\mathcal", "\\boldsymbol", "\\overline", "\\underline",
+    "\\left", "\\right", "\\text", "\\vec", "\\hat", "\\bar", "\\tilde",
+    "\\bigg", "\\Bigg", "\\big", "\\Big", "\\limits", "\\,", "\\;", "\\!", "\\ ",
+];
+
+/// Structure a flat glyph join cannot show, so the LaTeX is used instead.
+const TEX_STRUCTURE: &[&str] = &["\\frac", "\\dfrac", "\\tfrac", "\\sqrt", "\\over", "\\binom"];
+
+/// Clean a Wikipedia plain-text extract for reading in a pane: math
+/// blocks become one inline expression, and the debris left by dropped
+/// templates goes away.
+pub fn clean_wiki_extract(text: &str) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let ln = lines[i];
+        // A math block is a run of blank or indented lines carrying a
+        // {\displaystyle …} annotation. A run without one is ordinary
+        // blank space and falls through untouched.
+        if ln.is_empty() || ln.starts_with("  ") {
+            // A truly empty first line means the formula stood alone in
+            // the source; two spaces means it sat inside a sentence.
+            let display = ln.is_empty();
+            let mut j = i;
+            let mut toks: Vec<&str> = Vec::new();
+            let mut latex: Option<&str> = None;
+            while j < lines.len() && (lines[j].trim().is_empty() || lines[j].starts_with("  ")) {
+                let t = lines[j].trim();
+                if t.starts_with("{\\displaystyle") || t.starts_with("{\\textstyle") {
+                    latex = Some(t);
+                } else if !t.is_empty() {
+                    toks.push(t);
+                }
+                j += 1;
+            }
+            if let Some(tex) = latex {
+                let expr = if TEX_STRUCTURE.iter().any(|s| tex.contains(s)) {
+                    tidy_tex(tex)
+                } else {
+                    toks.concat()
+                };
+                let inline = !display && out.last().is_some_and(|l| !l.trim().is_empty());
+                if inline {
+                    if let Some(last) = out.last_mut() {
+                        last.push_str(&expr);
+                        // An inline formula never breaks its own sentence.
+                        if j < lines.len() && !lines[j].trim().is_empty() {
+                            last.push_str(lines[j]);
+                            j += 1;
+                        }
+                    }
+                } else {
+                    out.push(String::new());
+                    out.push(format!("    {expr}"));
+                }
+                i = j;
+                continue;
+            }
+        }
+        out.push(ln.to_string());
+        i += 1;
+    }
+    tidy_prose(&out)
+}
+
+/// `{\displaystyle E={\frac {a}{b}}}` → `E=(a)/(b)`.
+fn tidy_tex(line: &str) -> String {
+    let body = match line.find(' ') {
+        Some(p) => &line[p + 1..],
+        None => "",
+    };
+    let mut s = body.strip_suffix('}').unwrap_or(body).to_string();
+    // Innermost first, so nesting unwinds over a few passes.
+    for _ in 0..4 {
+        s = two_arg(&s, "\\frac", "(", ")/(", ")");
+        s = two_arg(&s, "\\dfrac", "(", ")/(", ")");
+        s = two_arg(&s, "\\tfrac", "(", ")/(", ")");
+        s = one_arg(&s, "\\sqrt", "√(", ")");
+    }
+    for (k, v) in TEX_SYMBOLS {
+        s = s.replace(k, v);
+    }
+    for n in TEX_NOISE {
+        s = s.replace(n, " ");
+    }
+    s = s.replace(['{', '}', '~'], " ").replace('\\', "");
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `cmd{A}{B}` → `open A mid B close`, only where neither argument nests.
+fn two_arg(s: &str, cmd: &str, open: &str, mid: &str, close: &str) -> String {
+    let Some(p) = s.find(cmd) else { return s.to_string() };
+    let rest = s[p + cmd.len()..].trim_start();
+    let off = s.len() - rest.len();
+    let Some(a) = braced(rest) else { return s.to_string() };
+    let after = rest[a.1..].trim_start();
+    let off2 = s.len() - after.len();
+    let Some(b) = braced(after) else { return s.to_string() };
+    let _ = off;
+    format!(
+        "{}{open}{}{mid}{}{close}{}",
+        &s[..p],
+        &rest[a.0..a.1 - 1],
+        &after[b.0..b.1 - 1],
+        &s[off2 + b.1..]
+    )
+}
+
+fn one_arg(s: &str, cmd: &str, open: &str, close: &str) -> String {
+    let Some(p) = s.find(cmd) else { return s.to_string() };
+    let rest = s[p + cmd.len()..].trim_start();
+    let off = s.len() - rest.len();
+    let Some(a) = braced(rest) else { return s.to_string() };
+    format!("{}{open}{}{close}{}", &s[..p], &rest[a.0..a.1 - 1], &s[off + a.1..])
+}
+
+/// A `{…}` group with no nesting: returns (inner start, past the `}`).
+fn braced(s: &str) -> Option<(usize, usize)> {
+    if !s.starts_with('{') {
+        return None;
+    }
+    let end = s[1..].find('}')? + 1;
+    if s[1..end].contains('{') {
+        return None;
+    }
+    Some((1, end + 1))
+}
+
+fn tidy_prose(lines: &[String]) -> String {
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    for line in lines {
+        let cleaned = tidy_line(line);
+        // Never more than one blank line in a row.
+        if cleaned.trim().is_empty() && out.last().is_some_and(|l| l.trim().is_empty()) {
+            continue;
+        }
+        out.push(cleaned);
+    }
+    out.join("\n")
+}
+
+/// One line of prose: drop the empty brackets and stray leading `;` the
+/// extract leaves where a template used to be, and squeeze the gaps.
+fn tidy_line(line: &str) -> String {
+    let indent = line.len() - line.trim_start().len();
+    let b: Vec<char> = line[indent..].chars().collect();
+    let mut out: Vec<char> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == '(' || c == '[' {
+            let close = if c == '(' { ')' } else { ']' };
+            let mut k = i + 1;
+            while k < b.len() && matches!(b[k], ' ' | ';' | ',') {
+                k += 1;
+            }
+            if b.get(k) == Some(&close) {
+                // Nothing survived inside: drop the brackets, and the
+                // space before them when punctuation follows.
+                let next = b[k + 1..].iter().find(|c| **c != ' ');
+                if matches!(next, Some(',' | '.' | ';' | ':')) {
+                    while out.last() == Some(&' ') {
+                        out.pop();
+                    }
+                }
+                i = k + 1;
+                continue;
+            }
+            out.push(c);
+            i = k;
+            continue;
+        }
+        if c == ' ' {
+            let mut k = i;
+            while k < b.len() && b[k] == ' ' {
+                k += 1;
+            }
+            // No space before closing punctuation, and never a run.
+            if !matches!(b.get(k), Some(',' | '.' | ';' | ':' | ')' | ']')) && !out.is_empty() {
+                out.push(' ');
+            }
+            i = k;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    while out.last() == Some(&' ') {
+        out.pop();
+    }
+    format!("{}{}", &line[..indent], out.into_iter().collect::<String>())
+}
