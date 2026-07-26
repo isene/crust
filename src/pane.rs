@@ -17,6 +17,10 @@ pub struct Pane {
     pub border_fg: Option<u16>,  // Custom border color (falls back to fg)
     pub scroll: bool,
     pub scroll_fg: Option<u16>,  // Custom scroll indicator color
+    /// Absolute column for the ▲/▼ markers. Default (None) puts them on
+    /// the pane's last column, which butts into the text when the pane is
+    /// the width of the content. Set this to park them out in a margin.
+    pub scroll_x: Option<u16>,
     pub align: Align,
     pub ix: usize,
     pub index: usize,
@@ -72,6 +76,7 @@ impl Pane {
             border_fg: None,
             scroll: true,
             scroll_fg: None,
+            scroll_x: None,
             align: Align::Left,
             ix: 0,
             index: 0,
@@ -221,13 +226,14 @@ impl Pane {
         // the pane is a centered popup).
         if self.scroll {
             let sc = self.scroll_fg.unwrap_or(self.fg);
+            let sx = self.scroll_x.unwrap_or(cx + cw - 1);
             if self.moreup {
                 print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{25B3}\x1b[0m",
-                    cy, cx + cw - 1, sc, self.bg);
+                    cy, sx, sc, self.bg);
             }
             if self.moredown {
                 print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{25BD}\x1b[0m",
-                    cy + ch - 1, cx + cw - 1, sc, self.bg);
+                    cy + ch - 1, sx, sc, self.bg);
             }
         }
 
@@ -337,13 +343,14 @@ impl Pane {
         // as the diff-render branch above.
         if self.scroll {
             let sc = self.scroll_fg.unwrap_or(self.fg);
+            let sx = self.scroll_x.unwrap_or(cx + cw - 1);
             if self.moreup {
                 print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{2206}\x1b[0m",
-                    cy, cx + cw - 1, sc, self.bg);
+                    cy, sx, sc, self.bg);
             }
             if self.moredown {
                 print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{2207}\x1b[0m",
-                    cy + ch - 1, cx + cw - 1, sc, self.bg);
+                    cy + ch - 1, sx, sc, self.bg);
             }
         }
 
