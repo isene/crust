@@ -58,6 +58,13 @@ pub struct Pane {
     /// any other key resets the cycle. Function pointer to keep the
     /// API simple — no captures, completer logic must be pure.
     pub completer: Option<fn(&str) -> Vec<String>>,
+    /// Optional Shift-Tab callback for `editline`. Receives the current
+    /// buffer; returns a replacement for it, or None to leave it as it
+    /// was. Meant for handing off to a full-screen chooser (pointer's
+    /// `--pick`, a font picker); the callback owns suspending and
+    /// restoring the terminal, exactly as a `$EDITOR` handoff does.
+    /// Function pointer for the same reason as `completer`.
+    pub picker: Option<fn(&str) -> Option<String>>,
 
     text: String,
     line_count: Option<usize>,
@@ -91,6 +98,7 @@ impl Pane {
             word_wrap: true,
             last_escaped: false,
             completer: None,
+            picker: None,
             text: String::new(),
             line_count: None,
             prev_frame: Vec::new(),
@@ -679,6 +687,15 @@ impl Pane {
                                     }
                                 }
                             }
+                        }
+                        (KeyCode::BackTab, _) => {
+                            if let Some(f) = self.picker {
+                                if let Some(picked) = f(&buf) {
+                                    buf = picked;
+                                    cursor = buf.len();
+                                }
+                            }
+                            tab_state = None;
                         }
                         (KeyCode::Char(c), _) if c != '\t' => {
                             buf.insert(cursor, c);
