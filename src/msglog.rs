@@ -8,15 +8,16 @@
 //! Ages are relative, so no clock or timezone is involved:
 //!
 //! ```no_run
+//! let mut pane = crust::Pane::new(1, 1, 80, 24, 255, 0);
 //! let mut log = crust::MessageLog::new(10);
 //! log.push("Sent to alice", 46);
-//! log.show("Messages", 255, 235);
+//! log.show("Messages", 255, 235, &mut [&mut pane]);
 //! ```
 
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use crate::{style, Popup};
+use crate::{style, Pane, Popup};
 
 pub struct MessageLog {
     cap: usize,
@@ -74,7 +75,12 @@ impl MessageLog {
 
     /// Open the log in a popup, sized to what it holds. Any of ESC, q
     /// or ENTER closes it.
-    pub fn show(&self, title: &str, fg: u16, bg: u16) {
+    ///
+    /// `restore` is every pane the popup covered. A pane redraws only
+    /// what changed since its last frame, and it never learns that a
+    /// popup wrote over it, so without this the popup's border and
+    /// text stay on screen after it closes.
+    pub fn show(&self, title: &str, fg: u16, bg: u16, restore: &mut [&mut Pane]) {
         let body = self.render();
         let content = format!("{}\n\n{}", style::bold(title), body);
         let (cols, rows) = crate::Crust::terminal_size();
@@ -82,7 +88,9 @@ impl MessageLog {
             .map(|l| crate::display_width(l)).max().unwrap_or(20);
         let w = (widest as u16 + 6).min(cols.saturating_sub(4)).max(24);
         let h = (content.split('\n').count() as u16 + 4).min(rows.saturating_sub(4));
-        Popup::centered(w, h, fg, bg).view(&content);
+        let mut popup = Popup::centered(w, h, fg, bg);
+        popup.view(&content);
+        popup.dismiss(restore);
     }
 }
 
