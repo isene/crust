@@ -19,6 +19,7 @@
 //! ```
 
 pub mod pane;
+pub mod msglog;
 pub mod popup;
 pub mod input;
 pub mod cursor;
@@ -26,6 +27,7 @@ pub mod style;
 pub mod text;
 
 pub use pane::Pane;
+pub use msglog::MessageLog;
 pub use popup::Popup;
 pub use input::Input;
 pub use cursor::seq;
