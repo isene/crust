@@ -177,10 +177,20 @@ pub fn clipboard_copy(text: &str, selection: &str) {
     print!("\x1b]52;{};{}\x07", sel_code, encoded);
     io::stdout().flush().ok();
 
-    // Also try xclip as backup (non-blocking spawn). Under setsid: xclip
-    // serves the selection until another owner appears, and in the
-    // caller's pty session it died of the SIGHUP the caller's exit sends,
-    // so a copy made just before quitting the app was lost.
+    // glass handles OSC 52 itself and holds the selection as long as the
+    // window lives. Spawning xclip under it took the selection straight
+    // back from glass and then died with the app's pty, so the copy was
+    // lost. glass sets TERM=xterm-kitty for its children, and kitty itself
+    // handles OSC 52 as well, so that TERM means the sequence above was
+    // enough. (_GLASS_ID is accepted too, should glass start exporting
+    // it.) The helper stays as the fallback for terminals without OSC 52.
+    let term = std::env::var("TERM").unwrap_or_default();
+    if term == "xterm-kitty" || std::env::var_os("_GLASS_ID").is_some() {
+        return;
+    }
+    // xclip under setsid: it serves the selection until another owner
+    // appears, and in the caller's pty session it died of the SIGHUP the
+    // caller's exit sends, so a copy made just before quitting was lost.
     let sel_arg = if selection == "primary" { "primary" } else { "clipboard" };
     if let Ok(mut child) = std::process::Command::new("setsid")
         .args(["xclip", "-selection", sel_arg])
