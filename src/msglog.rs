@@ -58,7 +58,9 @@ impl MessageLog {
     pub fn len(&self) -> usize { self.entries.len() }
     pub fn clear(&mut self) { self.entries.clear(); }
 
-    /// The log as lines, newest last, each in the color it was shown in.
+    /// One line per entry, newest last, each in the color it was shown
+    /// in. A message with more than one line shows its first, marked, and
+    /// the rest waits behind ENTER in [`show`](Self::show).
     pub fn render(&self) -> String {
         if self.entries.is_empty() {
             return style::fg("  (nothing yet)", 244);
@@ -69,27 +71,44 @@ impl MessageLog {
         self.entries.iter().map(|(t, msg, fg)| {
             let stamp = age(*t);
             let pad = " ".repeat(width - crate::display_width(&stamp));
-            format!("  {}{}  {}", pad, style::fg(&stamp, 244), style::fg(msg, *fg))
+            let mut lines = msg.lines();
+            let first = lines.next().unwrap_or("");
+            let more = if lines.next().is_some() { " \u{2026}" } else { "" };
+            format!("  {}{}  {}{}", pad, style::fg(&stamp, 244), style::fg(first, *fg),
+                    style::fg(more, 244))
         }).collect::<Vec<_>>().join("\n")
     }
 
-    /// Open the log in a popup, sized to what it holds. Any of ESC, q
-    /// or ENTER closes it.
+    /// Open the log as a list: Up/Down move, ENTER opens the entry under
+    /// the bar in full, ESC or q closes. The bar starts on the newest
+    /// entry, which is the one most likely to have been missed.
     ///
     /// `restore` is every pane the popup covered. A pane redraws only
     /// what changed since its last frame, and it never learns that a
     /// popup wrote over it, so without this the popup's border and
     /// text stay on screen after it closes.
     pub fn show(&self, title: &str, fg: u16, bg: u16, restore: &mut [&mut Pane]) {
-        let body = self.render();
-        let content = format!("{}\n\n{}", style::bold(title), body);
         let (cols, rows) = crate::Crust::terminal_size();
-        let widest = content.split('\n')
-            .map(|l| crate::display_width(l)).max().unwrap_or(20);
+        let list = self.render();
+        let widest = list.split('\n').map(|l| crate::display_width(l)).max().unwrap_or(20);
         let w = (widest as u16 + 6).min(cols.saturating_sub(4)).max(24);
-        let h = (content.split('\n').count() as u16 + 4).min(rows.saturating_sub(4));
+        let h = (list.split('\n').count() as u16 + 2).min(rows.saturating_sub(4));
         let mut popup = Popup::centered(w, h, fg, bg);
-        popup.view(&content);
+        popup.pane.index = self.entries.len().saturating_sub(1);
+        loop {
+            let Some(i) = popup.modal(&list) else { break };
+            let Some((t, msg, mfg)) = self.entries.get(i) else { continue };
+            let full = format!("{}  {}\n\n{}", style::bold(title), style::fg(&age(*t), 244),
+                               style::fg(msg, *mfg));
+            let widest = full.split('\n').map(|l| crate::display_width(l)).max().unwrap_or(20);
+            let vw = (widest as u16 + 6).min(cols.saturating_sub(4)).max(24);
+            let vh = (full.split('\n').count() as u16 + 4).min(rows.saturating_sub(4));
+            let mut view = Popup::centered(vw, vh, fg, bg);
+            view.view(&full);
+            // The viewer sat on top of the list; the list's next render
+            // must not trust its last frame.
+            view.dismiss(&mut [&mut popup.pane]);
+        }
         popup.dismiss(restore);
     }
 }
@@ -106,6 +125,16 @@ mod tests {
         assert!(!out.contains("one"), "oldest survived: {}", out);
         assert!(out.contains("four"), "newest missing: {}", out);
         assert_eq!(log.len(), 3);
+    }
+
+    #[test]
+    fn a_long_message_shows_its_first_line_marked() {
+        let mut log = MessageLog::new(3);
+        log.push("Unsubscribed you from the list.\nThe confirmation came back at once.", 46);
+        let out = log.render();
+        assert!(out.contains("Unsubscribed you from the list."), "{}", out);
+        assert!(!out.contains("confirmation"), "second line leaked into the list: {}", out);
+        assert!(out.contains('\u{2026}'), "no marker for more lines: {}", out);
     }
 
     #[test]

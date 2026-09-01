@@ -177,10 +177,13 @@ pub fn clipboard_copy(text: &str, selection: &str) {
     print!("\x1b]52;{};{}\x07", sel_code, encoded);
     io::stdout().flush().ok();
 
-    // Also try xclip as backup (non-blocking spawn)
+    // Also try xclip as backup (non-blocking spawn). Under setsid: xclip
+    // serves the selection until another owner appears, and in the
+    // caller's pty session it died of the SIGHUP the caller's exit sends,
+    // so a copy made just before quitting the app was lost.
     let sel_arg = if selection == "primary" { "primary" } else { "clipboard" };
-    if let Ok(mut child) = std::process::Command::new("xclip")
-        .args(["-selection", sel_arg])
+    if let Ok(mut child) = std::process::Command::new("setsid")
+        .args(["xclip", "-selection", sel_arg])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
