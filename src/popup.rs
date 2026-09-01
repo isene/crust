@@ -132,9 +132,25 @@ impl Popup {
         self.pane.refresh();
     }
 
-    /// Dismiss the popup and refresh underlying panes
+    /// Dismiss the popup and refresh underlying panes.
+    ///
+    /// The border ring sits outside the content area, and `clear` blanks
+    /// the content only. A border cell in a column no pane owns, the gap
+    /// between two panes for instance, is repainted by nobody and stays
+    /// on screen. So the ring is blanked here before the panes redraw.
     pub fn dismiss(&mut self, refresh_panes: &mut [&mut Pane]) {
         self.pane.clear();
+        if self.pane.border {
+            let (x, y, w, h) = (self.pane.x, self.pane.y, self.pane.w, self.pane.h);
+            let (x0, y0) = (x.saturating_sub(1).max(1), y.saturating_sub(1).max(1));
+            let row = " ".repeat(w as usize + 2);
+            print!("\x1b[0m\x1b[{};{}H{}\x1b[{};{}H{}", y0, x0, row, y + h, x0, row);
+            for r in y..y + h {
+                print!("\x1b[{};{}H \x1b[{};{}H ", r, x0, r, x + w);
+            }
+            use std::io::Write;
+            std::io::stdout().flush().ok();
+        }
         for pane in refresh_panes.iter_mut() {
             pane.full_refresh();
         }
