@@ -94,6 +94,13 @@ impl MessageLog {
         let w = (widest as u16 + 6).min(cols.saturating_sub(4)).max(24);
         let h = (list.split('\n').count() as u16 + 2).min(rows.saturating_sub(4));
         let mut popup = Popup::centered(w, h, fg, bg);
+        // Nothing to select in an empty log; a bar on "(nothing yet)"
+        // is a bar on nothing.
+        if self.entries.is_empty() {
+            popup.view(&list);
+            popup.dismiss(restore);
+            return;
+        }
         popup.pane.index = self.entries.len().saturating_sub(1);
         loop {
             let Some(i) = popup.modal(&list) else { break };

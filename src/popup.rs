@@ -8,13 +8,19 @@ pub struct Popup {
     pub pane: Pane,
 }
 
-/// One row drawn as the selection bar. Reverse video is re-armed after
-/// every reset inside the row, so an item carrying its own colors does
-/// not drop the bar half way across.
-fn select_bar(line: &str, width: usize) -> String {
-    let body = line.replace(style::RESET, &format!("{}{}", style::RESET, style::REVERSE));
+/// One row drawn as the selection bar: the pane's colours swapped, set
+/// explicitly and re-armed after every reset inside the row.
+///
+/// Reverse video was the obvious way and was wrong: it swaps whatever
+/// fg the run has, so an item in its own colour got a bar of that colour
+/// under its text and a bar of the pane's fg under the padding. Two
+/// tones on one row. An explicit background is one tone, and the item's
+/// own fg still shows on top of it.
+fn select_bar(line: &str, width: usize, fg: u16, bg: u16) -> String {
+    let bar = format!("{}{}", style::set_bg(fg as u8), style::set_fg(bg as u8));
+    let body = line.replace(style::RESET, &format!("{}{}", style::RESET, bar));
     let pad = width.saturating_sub(crate::display_width(line));
-    format!("{}{body}{}{}", style::REVERSE, " ".repeat(pad), style::RESET)
+    format!("{bar}{body}{bar}{}{}", " ".repeat(pad), style::RESET)
 }
 
 impl Popup {
@@ -115,7 +121,7 @@ impl Popup {
             .map(|(i, l)| {
                 let line = crate::truncate_ansi(l, w);
                 if i == self.pane.index {
-                    select_bar(&line, w)
+                    select_bar(&line, w, self.pane.fg, self.pane.bg)
                 } else {
                     line
                 }
