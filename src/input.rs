@@ -15,6 +15,15 @@ impl Input {
         crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false)
     }
 
+    /// As [`getchr`](Self::getchr), with the wait in milliseconds. For a
+    /// loop that is also draining something else, a stream of answer
+    /// chunks say: block in the kernel until a key or the deadline, then
+    /// look at the other thing. Idle programs keep using `getchr(None)`.
+    pub fn getchr_ms(timeout_ms: u64) -> Option<String> {
+        if !event::poll(Duration::from_millis(timeout_ms)).unwrap_or(false) { return None; }
+        Self::getchr(Some(0))
+    }
+
     /// Read a single key event, returning a named string like rcurses.
     /// Returns None on timeout (if timeout_secs is Some).
     pub fn getchr(timeout_secs: Option<u64>) -> Option<String> {
