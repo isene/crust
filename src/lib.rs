@@ -131,6 +131,35 @@ impl Crust {
         );
     }
 
+    /// True when the terminal reports key releases: asked with `CSI ? u`,
+    /// it answers within 100 ms with flag 2 set. Call right after
+    /// `enable_key_release`, before the first key is read: the reply is
+    /// read straight from the terminal, and a key typed in that window
+    /// is dropped. crossterm's own check is not used, because it then
+    /// waits without a timeout for a device-attributes reply that not
+    /// every terminal sends.
+    pub fn supports_key_release() -> bool {
+        let mut out = io::stdout();
+        if out.write_all(b"\x1b[?u").and_then(|_| out.flush()).is_err() { return false; }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+        let mut got = Vec::new();
+        let mut buf = [0u8; 64];
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() { return false; }
+            let mut fd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+            if unsafe { libc::poll(&mut fd, 1, left.as_millis() as i32) } <= 0 { return false; }
+            let n = unsafe { libc::read(0, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if n <= 0 { return false; }
+            got.extend_from_slice(&buf[..n as usize]);
+            // The reply is ESC [ ? <flags> u.
+            let Some(p) = got.windows(3).position(|w| w == b"\x1b[?") else { continue };
+            let Some(e) = got[p + 3..].iter().position(|&b| b == b'u') else { continue };
+            let flags: u32 = std::str::from_utf8(&got[p + 3..p + 3 + e]).ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+            return flags & 2 != 0;
+        }
+    }
+
     /// Companion to `enable_modifier_keys`; call before `cleanup()`
     /// so the terminal returns to legacy keyboard mode for whatever
     /// runs next in the same session.
