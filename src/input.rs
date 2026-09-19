@@ -1,7 +1,11 @@
 //! Input handling - equivalent to rcurses Input module (getchr)
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::time::Duration;
+
+/// What happened to a key, for readers that ask with `event_ms`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum KeyState { Pressed, Repeated, Released }
 
 pub struct Input;
 
@@ -24,6 +28,28 @@ impl Input {
         Self::getchr(Some(0))
     }
 
+    /// As [`getchr_ms`](Self::getchr_ms), with what happened to the key:
+    /// pressed, repeated or released. Releases and repeats only arrive
+    /// when the terminal speaks the kitty keyboard protocol and
+    /// [`Crust::enable_key_release`](crate::Crust::enable_key_release)
+    /// was called; elsewhere every event is a press. A game needs this;
+    /// `getchr` keeps skipping releases so no other app sees a key twice.
+    pub fn event_ms(timeout_ms: u64) -> Option<(String, KeyState)> {
+        if !event::poll(Duration::from_millis(timeout_ms)).unwrap_or(false) { return None; }
+        match event::read() {
+            Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) => {
+                let state = match kind {
+                    KeyEventKind::Release => KeyState::Released,
+                    KeyEventKind::Repeat => KeyState::Repeated,
+                    KeyEventKind::Press => KeyState::Pressed,
+                };
+                Some((Self::key_to_string(code, modifiers), state))
+            }
+            Ok(Event::Resize(_, _)) => Some(("RESIZE".to_string(), KeyState::Pressed)),
+            _ => None,
+        }
+    }
+
     /// Read a single key event, returning a named string like rcurses.
     /// Returns None on timeout (if timeout_secs is Some).
     pub fn getchr(timeout_secs: Option<u64>) -> Option<String> {
@@ -43,6 +69,8 @@ impl Input {
         };
 
         match ev {
+            // A release is not a key press; only `event_ms` reports it.
+            Event::Key(KeyEvent { kind: KeyEventKind::Release, .. }) => None,
             Event::Key(KeyEvent { code, modifiers, .. }) => {
                 Some(Self::key_to_string(code, modifiers))
             }

@@ -119,6 +119,18 @@ impl Crust {
         );
     }
 
+    /// Ask the terminal to report key releases and repeats as well as
+    /// presses (kitty keyboard protocol, flags 1 and 2). Terminals
+    /// without the protocol ignore it. Read them with
+    /// [`input::Input::event_ms`]; pop with `disable_modifier_keys`.
+    pub fn enable_key_release() {
+        use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
+        let _ = crossterm::execute!(
+            io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES),
+        );
+    }
+
     /// Companion to `enable_modifier_keys`; call before `cleanup()`
     /// so the terminal returns to legacy keyboard mode for whatever
     /// runs next in the same session.
