@@ -43,9 +43,32 @@ pub const ANSI_RE: &str = "\x1b\\[[0-9;]*m";
 pub struct Crust;
 
 impl Crust {
+    /// The sixteen colours a bare console has, set to the suite's own.
+    ///
+    /// The console holds eight colours and eight bright ones, and maps
+    /// every finer request down to them. The entries themselves can be
+    /// any colour, so this puts our oranges and greys in the slots and
+    /// the apps come out looking like themselves.
+    ///
+    /// Black first, then red through white, then the bright eight.
+    const CONSOLE_COLOURS: [&str; 16] = [
+        "0a0910", "f74c00", "78e68c", "ffb066", "5aa9e6", "c678dd", "56b6c2", "d8d6da",
+        "55555f", "ff7a3d", "a8f0b4", "ffd9a0", "8cc6f0", "e0a6f0", "8ee0e8", "ffffff",
+    ];
+
+    /// Is this the Linux console, where those sixteen are all there is?
+    fn on_console() -> bool {
+        std::env::var("TERM").map(|t| t == "linux").unwrap_or(false)
+    }
+
     pub fn init() {
         let mut stdout = io::stdout();
         terminal::enable_raw_mode().ok();
+        if Self::on_console() {
+            for (i, colour) in Self::CONSOLE_COLOURS.iter().enumerate() {
+                print!("\x1b]P{:X}{}", i, colour);
+            }
+        }
         // Alternate screen buffer
         crossterm::execute!(stdout, terminal::EnterAlternateScreen).ok();
         // Hide cursor
@@ -57,6 +80,10 @@ impl Crust {
 
     pub fn cleanup() {
         let mut stdout = io::stdout();
+        // The console's own colours back, for whatever runs next.
+        if Self::on_console() {
+            print!("\x1b]R");
+        }
         // Re-enable line wrap
         print!("\x1b[?7h");
         // Show cursor
