@@ -1,7 +1,11 @@
 //! Input handling - equivalent to rcurses Input module (getchr)
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+/// Off: Alt+x reads as plain "x", as it always has. On: as "M-x".
+static ALT_KEYS: AtomicBool = AtomicBool::new(false);
 
 /// What happened to a key, for readers that ask with `event_ms`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -10,6 +14,15 @@ pub enum KeyState { Pressed, Repeated, Released }
 pub struct Input;
 
 impl Input {
+    /// Report Alt+key as "M-x" ("M-1", "M-a") instead of the bare key.
+    /// Off by default: a terminal sends Alt+x as Esc then x, so in an
+    /// app where Esc is often followed at once by another key (a modal
+    /// editor), that pair would start to read as an Alt key. Apps that
+    /// bind Alt keys turn it on once at startup.
+    pub fn report_alt(on: bool) {
+        ALT_KEYS.store(on, Ordering::Relaxed);
+    }
+
     /// Non-blocking peek: returns true if at least one input event is
     /// already queued, false otherwise. Used by image-displaying TUIs
     /// to skip expensive previews while the user is still hammering
@@ -149,8 +162,27 @@ impl Input {
             KeyCode::Char(c) if ctrl => {
                 format!("C-{}", c.to_ascii_uppercase())
             }
+            KeyCode::Char(c) if mods.contains(KeyModifiers::ALT) && ALT_KEYS.load(Ordering::Relaxed) => {
+                format!("M-{}", c)
+            }
             KeyCode::Char(c) => c.to_string(),
             _ => String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alt_keys_read_as_m_only_when_asked() {
+        let alt1 = || Input::key_to_string(KeyCode::Char('1'), KeyModifiers::ALT);
+        assert_eq!(alt1(), "1");
+        Input::report_alt(true);
+        assert_eq!(alt1(), "M-1");
+        assert_eq!(Input::key_to_string(KeyCode::Char('1'), KeyModifiers::NONE), "1");
+        Input::report_alt(false);
+        assert_eq!(alt1(), "1");
     }
 }
