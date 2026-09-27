@@ -279,6 +279,47 @@ pub fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+/// The suite's Ctrl+A: hand the terminal to an interactive `claude`
+/// session about what is on screen, and take it back when it ends.
+///
+/// `intro` says where the user is and what they look at. `context` (the
+/// page, the message, the element) goes to a file only the user can
+/// read, named in the opening prompt, so a long text never floods the
+/// command line; the file goes when the session ends.
+///
+/// Returns false when `claude` would not start. The caller repaints
+/// afterwards, and turns bracketed paste back on if it uses it.
+pub fn claude_session(app: &str, intro: &str, context: &str) -> bool {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::env::temp_dir().join(format!("{}-claude-{}.txt", app, std::process::id()));
+    let _ = std::fs::remove_file(&file);
+    let wrote = !context.trim().is_empty()
+        && std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&file)
+            .and_then(|mut f| f.write_all(context.as_bytes()))
+            .is_ok();
+    let prompt = claude_prompt(app, intro, if wrote { Some(&file) } else { None });
+    Crust::disable_bracketed_paste();
+    Crust::cleanup();
+    Crust::clear_screen();
+    let started = std::process::Command::new("claude").arg(&prompt).status().is_ok();
+    Crust::init();
+    Crust::set_app_identity(app);
+    let _ = std::fs::remove_file(&file);
+    started
+}
+
+fn claude_prompt(app: &str, intro: &str, file: Option<&std::path::Path>) -> String {
+    let mut p = intro.trim().to_string();
+    if let Some(f) = file {
+        p.push_str(&format!(" What is on my screen is in {}: read it first.", f.display()));
+    }
+    p.push_str(&format!(
+        " Answer briefly, and ask what I want to know if I have not said. /exit takes me back to {}.",
+        app
+    ));
+    p
+}
+
 /// Strip ANSI escape sequences from a string
 pub fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
@@ -610,5 +651,18 @@ mod width_tests {
         // char count (✏️ is 2 chars, 🔒 is 1).
         assert_eq!(display_width(&pad_display("✏️", 4)), 4);
         assert_eq!(display_width(&pad_display("🔒", 4)), 4);
+    }
+}
+
+#[cfg(test)]
+mod claude_tests {
+    use super::*;
+
+    #[test]
+    fn the_prompt_names_the_screen_file_and_the_way_back() {
+        let p = claude_prompt("astro", "I am looking at M13 in astro.", Some(std::path::Path::new("/tmp/astro-claude-1.txt")));
+        assert!(p.starts_with("I am looking at M13 in astro. What is on my screen is in /tmp/astro-claude-1.txt: read it first."));
+        assert!(p.ends_with("/exit takes me back to astro."));
+        assert!(!claude_prompt("x", "Hi.", None).contains("read it first"), "no file, no mention of one");
     }
 }
