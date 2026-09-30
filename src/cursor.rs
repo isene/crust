@@ -80,7 +80,7 @@ impl Cursor {
     /// Query cursor position - returns (row, col)
     pub fn pos() -> (u16, u16) {
         // Use crossterm's position query
-        crossterm::cursor::position().unwrap_or((0, 0))
+        crate::crossterm::cursor::position().unwrap_or((0, 0))
     }
 
     /// Move up n rows
@@ -133,12 +133,12 @@ impl Cursor {
 
     /// Hide cursor
     pub fn hide() {
-        crossterm::execute!(io::stdout(), crossterm::cursor::Hide).ok();
+        crate::crossterm::execute!(io::stdout(), crate::crossterm::cursor::Hide).ok();
     }
 
     /// Show cursor
     pub fn show() {
-        crossterm::execute!(io::stdout(), crossterm::cursor::Show).ok();
+        crate::crossterm::execute!(io::stdout(), crate::crossterm::cursor::Show).ok();
     }
 
     /// Set the host terminal's caret shape via DECSCUSR (`CSI N q`).

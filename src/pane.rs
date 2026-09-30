@@ -527,7 +527,7 @@ impl Pane {
 
     /// Single-line editor with history support
     pub fn editline(&mut self) -> String {
-        use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+        use crate::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 
         let (cx, cy, cw, _) = self.content_area();
 
@@ -600,7 +600,7 @@ impl Pane {
             i
         };
 
-        crossterm::execute!(io::stdout(), crossterm::cursor::Show).ok();
+        crate::crossterm::execute!(io::stdout(), crate::crossterm::cursor::Show).ok();
         redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg, self.secret);
 
         loop {
@@ -720,7 +720,7 @@ impl Pane {
             redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg, self.secret);
         }
 
-        crossterm::execute!(io::stdout(), crossterm::cursor::Hide).ok();
+        crate::crossterm::execute!(io::stdout(), crate::crossterm::cursor::Hide).ok();
 
         if self.record && !buf.is_empty() && !self.secret {
             self.history.push(buf.clone());

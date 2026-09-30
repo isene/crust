@@ -1,6 +1,6 @@
 [package]
 name = "fe2o3-crust"
-version = "0.1.57"
+version = "0.1.58"
 edition = "2021"
 authors = ["Geir Isene <g@isene.com>"]
 description = "Rust TUI library with pane management, ANSI colors, scrolling, and input handling. Feature clone of rcurses."
@@ -13,8 +13,11 @@ categories = ["command-line-interface"]
 name = "crust"
 
 [dependencies]
-crossterm = "0.28"
 unicode-width = "0.2"
+
+# In a web page (wasm32-wasip1) src/web.rs stands in for crossterm.
+[target.'cfg(not(target_os = "wasi"))'.dependencies]
+crossterm = "0.28"
 libc = "0.2"
 
 [profile.release]

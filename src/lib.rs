@@ -26,6 +26,16 @@ pub mod cursor;
 pub mod style;
 pub mod text;
 
+// The terminal: crossterm, or in a web page the stand-in in web.rs.
+#[cfg(not(target_os = "wasi"))]
+pub(crate) use ::crossterm;
+#[cfg(target_os = "wasi")]
+#[path = "web.rs"]
+pub(crate) mod crossterm;
+#[cfg(all(test, not(target_os = "wasi")))]
+#[allow(dead_code, unused_macros, unused_imports)]
+mod web;
+
 pub use pane::Pane;
 pub use msglog::MessageLog;
 pub use popup::Popup;
@@ -166,6 +176,15 @@ impl Crust {
     /// waits without a timeout for a device-attributes reply that not
     /// every terminal sends.
     pub fn supports_key_release() -> bool {
+        // A web page reports keys its own way, never releases.
+        #[cfg(target_os = "wasi")]
+        return false;
+        #[cfg(not(target_os = "wasi"))]
+        Self::key_release_reply()
+    }
+
+    #[cfg(not(target_os = "wasi"))]
+    fn key_release_reply() -> bool {
         let mut out = io::stdout();
         if out.write_all(b"\x1b[?u").and_then(|_| out.flush()).is_err() { return false; }
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
@@ -259,6 +278,9 @@ pub fn clipboard_copy(text: &str, selection: &str) {
     // xclip under setsid: it serves the selection until another owner
     // appears, and in the caller's pty session it died of the SIGHUP the
     // caller's exit sends, so a copy made just before quitting was lost.
+    // A web page starts no programs.
+    #[cfg(not(target_os = "wasi"))]
+    {
     let sel_arg = if selection == "primary" { "primary" } else { "clipboard" };
     if let Ok(mut child) = std::process::Command::new("setsid")
         .args(["xclip", "-selection", sel_arg])
@@ -271,6 +293,7 @@ pub fn clipboard_copy(text: &str, selection: &str) {
             let _ = io::Write::write_all(stdin, text.as_bytes());
         }
         std::thread::spawn(move || { let _ = child.wait(); });
+    }
     }
 }
 
@@ -290,6 +313,18 @@ pub fn shell_escape(s: &str) -> String {
 /// Returns false when `claude` would not start. The caller repaints
 /// afterwards, and turns bracketed paste back on if it uses it.
 pub fn claude_session(app: &str, intro: &str, context: &str) -> bool {
+    // A web page has no claude to start, and no files.
+    #[cfg(target_os = "wasi")]
+    {
+        let _ = (app, intro, context);
+        false
+    }
+    #[cfg(not(target_os = "wasi"))]
+    claude_run(app, intro, context)
+}
+
+#[cfg(not(target_os = "wasi"))]
+fn claude_run(app: &str, intro: &str, context: &str) -> bool {
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::env::temp_dir().join(format!("{}-claude-{}.txt", app, std::process::id()));
     let _ = std::fs::remove_file(&file);
@@ -308,6 +343,7 @@ pub fn claude_session(app: &str, intro: &str, context: &str) -> bool {
     started
 }
 
+#[cfg(not(target_os = "wasi"))]
 fn claude_prompt(app: &str, intro: &str, file: Option<&std::path::Path>) -> String {
     let mut p = intro.trim().to_string();
     if let Some(f) = file {

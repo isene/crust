@@ -102,6 +102,16 @@ let selection = popup.modal("line1\nline2\nline3");
 
 Border is drawn **outside** the pane area (matching rcurses). The pane's (x, y, w, h) IS the content area. `content_area()` always returns (x, y, w, h). Line truncation preserves ANSI codes. Tab expansion and ANSI reset restoration ensure correct rendering in all panes.
 
+## In a web page
+
+A crust app builds for a web page with no change to its code:
+
+```bash
+web/build.sh ../rpnx rpnx.wasm
+```
+
+`web/term.js` then runs it in a terminal drawn by [xterm.js](https://xtermjs.org). The app gets that terminal and the keys typed into it, and nothing else. It has no files, no network and no other programs. `src/web.rs` has the details. The apps on the [try page](https://isene.github.io/fe2o3/try/) run this way.
+
 ## Part of the Fe2O3 Rust Terminal Suite
 
 See the [Fe₂O₃ suite overview](https://github.com/isene/fe2o3) and the [landing page](https://isene.org/fe2o3/) for the full list of projects.

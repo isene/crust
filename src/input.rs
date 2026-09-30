@@ -1,6 +1,6 @@
 //! Input handling - equivalent to rcurses Input module (getchr)
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crate::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -29,7 +29,7 @@ impl Input {
     /// j/k on autorepeat — render the cheap state now, do the heavy
     /// graphics work after the burst ends.
     pub fn peek_pending() -> bool {
-        crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false)
+        crate::crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false)
     }
 
     /// As [`getchr`](Self::getchr), with the wait in milliseconds. For a
