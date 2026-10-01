@@ -112,6 +112,8 @@ web/build.sh ../rpnx rpnx.wasm
 
 `web/term.js` then runs it in a terminal drawn by [xterm.js](https://xtermjs.org). The app gets that terminal and the keys typed into it, and nothing else. It has no files, no network and no other programs. `src/web.rs` has the details. The apps on the [try page](https://isene.github.io/fe2o3/try/) run this way.
 
+A web page has no Claude. `term.js` stops Ctrl+A before the app sees it. `crust::CLAUDE` is false there, and `crust::key_help(text)` takes the Claude lines out of an app's key help. In a terminal the text comes back untouched.
+
 ## Part of the Fe2O3 Rust Terminal Suite
 
 See the [Fe₂O₃ suite overview](https://github.com/isene/fe2o3) and the [landing page](https://isene.org/fe2o3/) for the full list of projects.

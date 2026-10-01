@@ -323,6 +323,44 @@ pub fn claude_session(app: &str, intro: &str, context: &str) -> bool {
     claude_run(app, intro, context)
 }
 
+/// Whether a `claude` program can run here. A web page has none.
+pub const CLAUDE: bool = cfg!(not(target_os = "wasi"));
+
+/// Key help as this build can honour it. In a web page, where no `claude`
+/// can run, the lines and the ` · ` items that name Claude go. Everywhere
+/// else the text comes back as it is.
+pub fn key_help<'a>(text: impl Into<std::borrow::Cow<'a, str>>) -> std::borrow::Cow<'a, str> {
+    let text = text.into();
+    #[cfg(target_os = "wasi")]
+    {
+        std::borrow::Cow::Owned(no_claude(&text))
+    }
+    #[cfg(not(target_os = "wasi"))]
+    text
+}
+
+#[cfg(any(test, target_os = "wasi"))]
+fn no_claude(text: &str) -> String {
+    let names = |s: &str| s.contains("laude");
+    let mut out: Vec<String> = Vec::new();
+    let mut cut = false;
+    for line in text.split('\n') {
+        if !names(line) {
+            // A paragraph that went leaves one blank line behind, not two.
+            let blank = |l: &str| l.trim().is_empty();
+            if !(cut && blank(line) && out.last().is_some_and(|l| blank(l))) {
+                out.push(line.to_string());
+            }
+            cut = false;
+        } else if line.contains(" · ") {
+            out.push(line.split(" · ").filter(|item| !names(item)).collect::<Vec<_>>().join(" · "));
+        } else {
+            cut = true;
+        }
+    }
+    out.join("\n")
+}
+
 #[cfg(not(target_os = "wasi"))]
 fn claude_run(app: &str, intro: &str, context: &str) -> bool {
     use std::os::unix::fs::OpenOptionsExt;
@@ -700,5 +738,22 @@ mod claude_tests {
         assert!(p.starts_with("I am looking at M13 in astro. What is on my screen is in /tmp/astro-claude-1.txt: read it first."));
         assert!(p.ends_with("/exit takes me back to astro."));
         assert!(!claude_prompt("x", "Hi.", None).contains("read it first"), "no file, no mention of one");
+    }
+
+    #[test]
+    fn key_help_is_untouched_where_claude_runs() {
+        let footer = "/ find · c claude · ? help · q";
+        assert_eq!(key_help(footer), footer);
+        assert!(CLAUDE);
+    }
+
+    #[test]
+    fn a_web_page_loses_the_claude_keys_and_nothing_else() {
+        assert_eq!(no_claude("/ find · c claude · ? help · q"), "/ find · ? help · q");
+        assert_eq!(no_claude("five at a time · Ctrl+A Claude · q quits"), "five at a time · q quits");
+        let help = "  / find\n  c  ask Claude about this star\n  Ctrl-A  a full Claude session\n  q  quit\n";
+        assert_eq!(no_claude(help), "  / find\n  q  quit\n");
+        assert_eq!(no_claude("keys\n\nThe Claude view runs claude.\nClaude starts afresh.\n\nMore."), "keys\n\nMore.");
+        assert_eq!(key_help(String::from("q quits")), "q quits");
     }
 }
