@@ -189,6 +189,8 @@ pub const RESET: &str = "\x1b[0m";
 pub const DIM: &str = "\x1b[2m";
 pub const BOLD: &str = "\x1b[1m";
 pub const REVERSE: &str = "\x1b[7m";
+/// Ends REVERSE and nothing else (SGR 27): colours and bold stay as they are.
+pub const REVERSE_OFF: &str = "\x1b[27m";
 
 /// An OSC 8 hyperlink: `label` becomes clickable, pointing at `url`.
 ///

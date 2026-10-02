@@ -449,6 +449,14 @@ impl Pane {
         self.wrap_lines(cw as usize).len()
     }
 
+    /// The text as the pane shows it: one entry per row, long lines
+    /// wrapped to the pane's width. `ix` counts in these rows, so this is
+    /// how a caller finds the row to scroll to.
+    pub fn visual_lines(&self) -> Vec<String> {
+        let (_, _, cw, _) = self.content_area();
+        self.wrap_lines(cw as usize)
+    }
+
     pub fn linedown(&mut self) {
         let total = self.visual_line_count();
         if self.ix < total.saturating_sub(1) {
