@@ -73,6 +73,15 @@ impl Crust {
 
     pub fn init() {
         let mut stdout = io::stdout();
+        // Started with its output thrown away (a file opener run from
+        // another program does that), nobody can see this screen. It
+        // would still read the terminal it was started on, and take every
+        // other key from the program in view there. So the program ends.
+        #[cfg(not(target_os = "wasi"))]
+        if !io::IsTerminal::is_terminal(&stdout) {
+            eprintln!("No terminal to draw on.");
+            std::process::exit(1);
+        }
         terminal::enable_raw_mode().ok();
         if Self::on_console() {
             for (i, colour) in Self::CONSOLE_COLOURS.iter().enumerate() {

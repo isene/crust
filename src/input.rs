@@ -29,7 +29,23 @@ impl Input {
     /// j/k on autorepeat — render the cheap state now, do the heavy
     /// graphics work after the burst ends.
     pub fn peek_pending() -> bool {
-        crate::crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false)
+        Self::ready(Duration::from_millis(0))
+    }
+
+    /// Wait for input, at most `wait`. True when some is there.
+    ///
+    /// An error means there is no terminal to read: the program was
+    /// started without one, or its terminal is gone. No key can ever
+    /// come, and a caller that loops on "no key yet" would keep a core
+    /// busy until someone kills it. So the program ends.
+    fn ready(wait: Duration) -> bool {
+        match event::poll(wait) {
+            Ok(ready) => ready,
+            #[cfg(not(target_os = "wasi"))]
+            Err(_) => std::process::exit(1),
+            #[cfg(target_os = "wasi")]
+            Err(_) => false,
+        }
     }
 
     /// As [`getchr`](Self::getchr), with the wait in milliseconds. For a
@@ -37,7 +53,7 @@ impl Input {
     /// chunks say: block in the kernel until a key or the deadline, then
     /// look at the other thing. Idle programs keep using `getchr(None)`.
     pub fn getchr_ms(timeout_ms: u64) -> Option<String> {
-        if !event::poll(Duration::from_millis(timeout_ms)).unwrap_or(false) { return None; }
+        if !Self::ready(Duration::from_millis(timeout_ms)) { return None; }
         Self::getchr(Some(0))
     }
 
@@ -48,7 +64,7 @@ impl Input {
     /// was called; elsewhere every event is a press. A game needs this;
     /// `getchr` keeps skipping releases so no other app sees a key twice.
     pub fn event_ms(timeout_ms: u64) -> Option<(String, KeyState)> {
-        if !event::poll(Duration::from_millis(timeout_ms)).unwrap_or(false) { return None; }
+        if !Self::ready(Duration::from_millis(timeout_ms)) { return None; }
         match event::read() {
             Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) => {
                 let state = match kind {
@@ -66,13 +82,7 @@ impl Input {
     /// Read a single key event, returning a named string like rcurses.
     /// Returns None on timeout (if timeout_secs is Some).
     pub fn getchr(timeout_secs: Option<u64>) -> Option<String> {
-        let available = if let Some(secs) = timeout_secs {
-            event::poll(Duration::from_secs(secs)).unwrap_or(false)
-        } else {
-            event::poll(Duration::from_secs(86400)).unwrap_or(false)
-        };
-
-        if !available {
+        if !Self::ready(Duration::from_secs(timeout_secs.unwrap_or(86400))) {
             return None;
         }
 
