@@ -230,6 +230,24 @@ impl Crust {
         io::stdout().flush().ok();
     }
 
+    /// Ask the terminal to say when its window stops being the one in
+    /// front, and when it is in front again (DECSET 1004). The reports
+    /// arrive from [`input::Input::event_ms`] as "FOCUS_OUT" and
+    /// "FOCUS_IN"; a terminal without them ignores the request. A program
+    /// that shows something moving uses this to stand still while nobody
+    /// looks. Turn it off with `disable_focus_reports` before `cleanup`,
+    /// or the shell that runs next gets the reports as typed text.
+    pub fn enable_focus_reports() {
+        use crossterm::event::EnableFocusChange;
+        let _ = crossterm::execute!(io::stdout(), EnableFocusChange);
+    }
+
+    /// Focus reports off again.
+    pub fn disable_focus_reports() {
+        use crossterm::event::DisableFocusChange;
+        let _ = crossterm::execute!(io::stdout(), DisableFocusChange);
+    }
+
     /// Bracketed paste on: pasted text arrives as one `Input::getchr`
     /// event (`"PASTE\0<text>"`) instead of a burst of keystrokes.
     pub fn enable_bracketed_paste() {

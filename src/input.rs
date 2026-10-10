@@ -61,7 +61,10 @@ impl Input {
     /// pressed, repeated or released. Releases and repeats only arrive
     /// when the terminal speaks the kitty keyboard protocol and
     /// [`Crust::enable_key_release`](crate::Crust::enable_key_release)
-    /// was called; elsewhere every event is a press. A game needs this;
+    /// was called; elsewhere every event is a press. A resize comes as
+    /// "RESIZE", and after
+    /// [`Crust::enable_focus_reports`](crate::Crust::enable_focus_reports)
+    /// a focus change as "FOCUS_IN" or "FOCUS_OUT". A game needs this;
     /// `getchr` keeps skipping releases so no other app sees a key twice.
     pub fn event_ms(timeout_ms: u64) -> Option<(String, KeyState)> {
         if !Self::ready(Duration::from_millis(timeout_ms)) { return None; }
@@ -75,6 +78,9 @@ impl Input {
                 Some((Self::key_to_string(code, modifiers), state))
             }
             Ok(Event::Resize(_, _)) => Some(("RESIZE".to_string(), KeyState::Pressed)),
+            // Only after `Crust::enable_focus_reports`.
+            Ok(Event::FocusGained) => Some(("FOCUS_IN".to_string(), KeyState::Pressed)),
+            Ok(Event::FocusLost) => Some(("FOCUS_OUT".to_string(), KeyState::Pressed)),
             _ => None,
         }
     }

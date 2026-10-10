@@ -147,10 +147,14 @@ pub mod event {
     pub struct PopKeyboardEnhancementFlags;
     pub struct EnableBracketedPaste;
     pub struct DisableBracketedPaste;
+    pub struct EnableFocusChange;
+    pub struct DisableFocusChange;
     impl Command for PushKeyboardEnhancementFlags { fn ansi(&self) -> &'static str { "" } }
     impl Command for PopKeyboardEnhancementFlags { fn ansi(&self) -> &'static str { "" } }
     impl Command for EnableBracketedPaste { fn ansi(&self) -> &'static str { "" } }
     impl Command for DisableBracketedPaste { fn ansi(&self) -> &'static str { "" } }
+    impl Command for EnableFocusChange { fn ansi(&self) -> &'static str { "" } }
+    impl Command for DisableFocusChange { fn ansi(&self) -> &'static str { "" } }
 }
 
 use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
