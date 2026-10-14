@@ -230,6 +230,21 @@ impl Crust {
         io::stdout().flush().ok();
     }
 
+    /// Paint the terminal's whole background in `hex` ("#rrggbb", OSC 11),
+    /// as prism does to preview a colour. `reset_background` brings the
+    /// terminal's own colour back (OSC 111). A terminal without them
+    /// ignores both.
+    pub fn set_background(hex: &str) {
+        print!("\x1b]11;{hex}\x07");
+        io::stdout().flush().ok();
+    }
+
+    /// The terminal's own background again, after `set_background`.
+    pub fn reset_background() {
+        print!("\x1b]111\x07");
+        io::stdout().flush().ok();
+    }
+
     /// Ask the terminal to say when its window stops being the one in
     /// front, and when it is in front again (DECSET 1004). The reports
     /// arrive from [`input::Input::event_ms`] as "FOCUS_OUT" and
