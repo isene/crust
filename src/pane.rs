@@ -784,10 +784,14 @@ impl Pane {
                 // Word-wrap with ANSI preservation
                 let mut current = String::new();
                 let mut current_width = 0;
-                let mut active_ansi = String::new();
+                // The colours and attributes at the start of `current`. A
+                // row that breaks reads its codes up to the break, so a row
+                // broken at a space starts with the state at that space.
+                let mut row_start = Sgr::default();
                 // OSC 8 link target that's currently open, if any. We need
                 // this to re-open the link on each continuation segment.
                 let mut active_osc_url: Option<String> = None;
+                let mut row_start_url: Option<String> = None;
 
                 let chars: Vec<char> = line.chars().collect();
                 let mut i = 0;
@@ -803,11 +807,6 @@ impl Pane {
                             i += 1; // include the letter
                         }
                         let seq: String = chars[start..i].iter().collect();
-                        if seq == "\x1b[0m" {
-                            active_ansi.clear();
-                        } else {
-                            active_ansi = seq.clone();
-                        }
                         current.push_str(&seq);
                         continue;
                     }
@@ -847,33 +846,27 @@ impl Pane {
 
                     let ch_width = crate::cell_width(chars[i]);
                     if current_width + ch_width > width {
+                        // Try to break at last space (word-wrap only)
+                        let space = if self.word_wrap { current.rfind(' ') } else { None };
+                        // The state where the row breaks, at the space or
+                        // here, is the state the next row starts with.
+                        scan_escapes(&current[..space.unwrap_or(current.len())], &mut row_start, &mut row_start_url);
+                        let remainder = match space {
+                            Some(sp) => { let r = current[sp + 1..].to_string(); current.truncate(sp); r }
+                            None => String::new(),
+                        };
                         // If a hyperlink is open, close it before the wrap
                         // boundary so the pane's trailing padding + next
                         // row's leading cells don't inherit the link.
-                        let close_osc = if active_osc_url.is_some() {
-                            "\x1b]8;;\x1b\\"
-                        } else {
-                            ""
+                        if row_start_url.is_some() { current.push_str("\x1b]8;;\x1b\\"); }
+                        result.push(current);
+                        current = match row_start_url {
+                            Some(ref u) => format!("\x1b]8;;{}\x1b\\", u),
+                            None => String::new(),
                         };
-                        let reopen_osc = if let Some(ref url) = active_osc_url {
-                            format!("\x1b]8;;{}\x1b\\", url)
-                        } else {
-                            String::new()
-                        };
-                        // Try to break at last space (word-wrap only)
-                        if let Some(space_pos) = if self.word_wrap { current.rfind(' ') } else { None } {
-                            let remainder: String = current[space_pos + 1..].to_string();
-                            current.truncate(space_pos);
-                            current.push_str(close_osc);
-                            result.push(current);
-                            current = format!("{}{}{}", reopen_osc, active_ansi, remainder);
-                            current_width = display_width(&strip_ansi(&current));
-                        } else {
-                            current.push_str(close_osc);
-                            result.push(current);
-                            current = format!("{}{}", reopen_osc, active_ansi);
-                            current_width = 0;
-                        }
+                        row_start.write(&mut current);
+                        current.push_str(&remainder);
+                        current_width = display_width(&strip_ansi(&current));
                     }
 
                     current.push(chars[i]);
@@ -1039,6 +1032,129 @@ fn has_ansi_bg(s: &str) -> bool {
     false
 }
 
+/// The colours and attributes the SGR codes on a line have set so far.
+/// A wrapped row starts with them again, or it would lose a colour that
+/// began on the row above.
+#[derive(Default)]
+struct Sgr {
+    fg: String,
+    bg: String,
+    /// The underline, as written: `4`, or a style such as `4:3`.
+    under: String,
+    /// The underline colour (`58;…`).
+    under_fg: String,
+    /// Bold, dim, italic, blink, fast blink, reverse, hidden, struck: 1 to 9.
+    on: [bool; 10],
+}
+
+impl Sgr {
+    /// Take in one CSI sequence; other than SGR (`…m`) it changes nothing.
+    fn apply(&mut self, seq: &str) {
+        let Some(body) = seq.strip_prefix("\x1b[").and_then(|b| b.strip_suffix('m')) else { return };
+        if body.is_empty() { self.reset(); return; }
+        // The parameters, without a Vec: a code has a handful at most.
+        let mut p = [""; 16];
+        let mut len = 0;
+        for x in body.split(';') {
+            if len == p.len() { break; }
+            p[len] = x;
+            len += 1;
+        }
+        let set = |to: &mut String, v: &[&str]| {
+            to.clear();
+            for (j, x) in v.iter().enumerate() {
+                if j > 0 { to.push(';'); }
+                to.push_str(x);
+            }
+        };
+        let mut i = 0;
+        while i < len {
+            let head = p[i].split(':').next().unwrap_or("");
+            match head.parse::<usize>().unwrap_or(0) {
+                0 => self.reset(),
+                4 if p[i] == "4:0" => self.under.clear(),
+                4 => set(&mut self.under, &p[i..=i]),
+                n @ (1..=3 | 5..=9) => self.on[n] = true,
+                21 | 24 => self.under.clear(),
+                22 => { self.on[1] = false; self.on[2] = false; }
+                n @ (23 | 25..=29) => self.on[n - 20] = false,
+                30..=37 | 90..=97 => set(&mut self.fg, &p[i..=i]),
+                39 => self.fg.clear(),
+                40..=47 | 100..=107 => set(&mut self.bg, &p[i..=i]),
+                49 => self.bg.clear(),
+                59 => self.under_fg.clear(),
+                n @ (38 | 48 | 58) => {
+                    // 38;5;n or 38;2;r;g;b, and the same for 48 and 58.
+                    let k = match p.get(i + 1) { Some(&"5") => 3, Some(&"2") => 5, _ => 1 };
+                    let v = &p[i..(i + k).min(len)];
+                    match n { 38 => set(&mut self.fg, v), 48 => set(&mut self.bg, v), _ => set(&mut self.under_fg, v) }
+                    i += k;
+                    continue;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    /// Everything off, keeping the strings' room for the next code.
+    fn reset(&mut self) {
+        self.fg.clear();
+        self.bg.clear();
+        self.under.clear();
+        self.under_fg.clear();
+        self.on = [false; 10];
+    }
+
+    /// The state as SGR codes, one sequence each, so the pane's bg
+    /// stripping still finds the bg on its own.
+    fn write(&self, out: &mut String) {
+        for n in 1..10 {
+            if self.on[n] {
+                out.push_str("\x1b[");
+                out.push((b'0' + n as u8) as char);
+                out.push('m');
+            }
+        }
+        for v in [&self.under, &self.under_fg, &self.fg, &self.bg] {
+            if !v.is_empty() {
+                out.push_str("\x1b[");
+                out.push_str(v);
+                out.push('m');
+            }
+        }
+    }
+}
+
+/// Run the escapes in `s` over a state: SGR codes and OSC 8 links.
+fn scan_escapes(s: &str, sgr: &mut Sgr, url: &mut Option<String>) {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != 0x1b || i + 1 >= b.len() { i += 1; continue; }
+        let start = i;
+        if b[i + 1] == b'[' {
+            i += 2;
+            while i < b.len() && !b[i].is_ascii_alphabetic() { i += 1; }
+            i = (i + 1).min(b.len());
+            sgr.apply(&s[start..i]);
+        } else if b[i + 1] == b']' {
+            i += 2;
+            while i < b.len() && b[i] != 0x07 && !(b[i] == 0x1b && b.get(i + 1) == Some(&b'\\')) { i += 1; }
+            let body = &s[start + 2..i];
+            i = if i < b.len() && b[i] == 0x07 { i + 1 } else { (i + 2).min(b.len()) };
+            if let Some(rest) = body.strip_prefix("8;") {
+                if let Some(sep) = rest.find(';') {
+                    let u = &rest[sep + 1..];
+                    *url = if u.is_empty() { None } else { Some(u.to_string()) };
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
 /// Strip ANSI background color sequences from a string.
 /// Preserves foreground colors, text attributes, and all UTF-8 content.
 fn strip_ansi_bg(s: &str) -> String {
@@ -1174,5 +1290,44 @@ mod edit_window_tests {
         for cursor in 0..=10 {
             assert_eq!(edit_window(10, cursor, 20), 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rows(text: &str, width: usize, word_wrap: bool) -> Vec<String> {
+        let mut p = Pane::new(1, 1, 80, 10, 7, 0);
+        p.word_wrap = word_wrap;
+        p.text = text.to_string();
+        p.wrap_lines(width)
+    }
+
+    #[test]
+    fn a_link_broken_at_a_space_keeps_its_colour() {
+        // What highlight writes for `"[Drive on Stalingrad](url)"`: the row
+        // breaks at the space in the link text, after the grey url began.
+        let line = "like \"\x1b[38;5;242m[\x1b[39m\x1b[4m\x1b[38;5;81mDrive on Stalingrad\x1b[39m\x1b[24m\
+                    \x1b[38;5;242m](https://example.com/x)\x1b[39m\".";
+        let r = rows(line, 24, true);
+        assert!(r[1].starts_with("\x1b[4m\x1b[38;5;81mStalingrad"), "{:?}", r);
+    }
+
+    #[test]
+    fn a_hard_break_keeps_every_attribute() {
+        let r = rows("\x1b[1m\x1b[38;5;197mabcdefghij\x1b[39m\x1b[22m", 4, false);
+        assert_eq!(r.len(), 3);
+        assert!(r[1].starts_with("\x1b[1m\x1b[38;5;197mefgh"), "{:?}", r);
+        // The codes that end it leave nothing for the row after.
+        let r = rows("\x1b[1mab\x1b[22mcdefgh", 4, false);
+        assert!(r[1].starts_with("efgh"), "{:?}", r);
+    }
+
+    #[test]
+    fn a_link_closed_after_the_space_is_closed_on_its_row() {
+        let r = rows("aa \x1b]8;;u\x1b\\bb cc\x1b]8;;\x1b\\ddddd", 8, true);
+        assert!(r[0].ends_with("\x1b]8;;\x1b\\"), "{:?}", r);
+        assert!(r[1].starts_with("\x1b]8;;u\x1b\\cc"), "{:?}", r);
     }
 }
