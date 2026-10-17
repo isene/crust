@@ -674,6 +674,12 @@ impl Pane {
                             buf.truncate(cursor);
                             tab_state = None;
                         }
+                        // Ctrl+U clears what is left of the cursor, as in a shell.
+                        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                            buf.replace_range(..cursor, "");
+                            cursor = 0;
+                            tab_state = None;
+                        }
                         (KeyCode::Tab, _) => {
                             // Cycle through completions if a completer
                             // is registered; otherwise eat the Tab
