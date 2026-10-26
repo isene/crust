@@ -259,7 +259,7 @@ impl Crust {
 
     /// Ask the terminal to say when its window stops being the one in
     /// front, and when it is in front again (DECSET 1004). The reports
-    /// arrive from [`input::Input::event_ms`] as "FOCUS_OUT" and
+    /// arrive from [`input::Input::getchr`] and `event_ms` as "FOCUS_OUT" and
     /// "FOCUS_IN"; a terminal without them ignores the request. A program
     /// that shows something moving uses this to stand still while nobody
     /// looks. Turn it off with `disable_focus_reports` before `cleanup`,

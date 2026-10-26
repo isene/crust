@@ -74,6 +74,8 @@ let key = Input::getchr(Some(5));        // 5-second timeout
 // Returns: "UP", "DOWN", "LEFT", "RIGHT", "ENTER", "ESC",
 //          "PgUP", "PgDOWN", "HOME", "END", "TAB", "S-TAB",
 //          "C-A".."C-Z", "F1".."F12", "S-UP", "S-DOWN", etc.
+// After Crust::enable_ctrl_shift_keys: "C-S-A".."C-S-Z", "S-ENTER".
+// After Crust::enable_focus_reports: "FOCUS_IN", "FOCUS_OUT".
 ```
 
 ### Style
