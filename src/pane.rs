@@ -13,6 +13,9 @@ pub struct Pane {
     pub h: u16,
     pub fg: u16,
     pub bg: u16,
+    /// A true colour background. When set it wins over `bg`, for a shade
+    /// the 256 colours lack (a dark purple there turns grey).
+    pub bg_rgb: Option<(u8, u8, u8)>,
     pub border: bool,
     pub border_fg: Option<u16>,  // Custom border color (falls back to fg)
     pub scroll: bool,
@@ -79,6 +82,7 @@ impl Pane {
     pub fn new(x: u16, y: u16, w: u16, h: u16, fg: u16, bg: u16) -> Self {
         Self {
             x, y, w, h, fg, bg,
+            bg_rgb: None,
             border: false,
             border_fg: None,
             scroll: true,
@@ -102,6 +106,28 @@ impl Pane {
             text: String::new(),
             line_count: None,
             prev_frame: Vec::new(),
+        }
+    }
+
+    /// The pane's background as an SGR sequence: `bg_rgb` when set,
+    /// else the 256-colour `bg`.
+    pub fn bg_seq(&self) -> String {
+        match self.bg_rgb {
+            Some((r, g, b)) => crate::style::set_bg_rgb(r, g, b),
+            None => format!("\x1b[48;5;{}m", self.bg),
+        }
+    }
+
+    /// Give the pane a true colour background from "#rrggbb" or "rrggbb".
+    /// False, and no change, when `hex` is not a colour.
+    pub fn set_bg_hex(&mut self, hex: &str) -> bool {
+        match crate::style::parse_hex_color(hex) {
+            Some(rgb) => {
+                self.bg_rgb = Some(rgb);
+                self.prev_frame.clear();
+                true
+            }
+            None => false,
         }
     }
 
@@ -152,7 +178,7 @@ impl Pane {
         // Clear the pane area on screen
         let (content_x, content_y, content_w, content_h) = self.content_area();
         let blank = " ".repeat(content_w as usize);
-        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+        let bg_code = self.bg_seq();
         for row in 0..content_h {
             print!("\x1b[{};{}H{}{}\x1b[0m", content_y + row, content_x, bg_code, blank);
         }
@@ -184,7 +210,7 @@ impl Pane {
         }
 
         // Diff render: only write changed lines
-        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+        let bg_code = self.bg_seq();
         let fg_code = format!("\x1b[38;5;{}m", self.fg);
         let pane_colors = format!("{}{}", bg_code, fg_code);
 
@@ -236,12 +262,12 @@ impl Pane {
             let sc = self.scroll_fg.unwrap_or(self.fg);
             let sx = self.scroll_x.unwrap_or(cx + cw - 1);
             if self.moreup {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{25B3}\x1b[0m",
-                    cy, sx, sc, self.bg);
+                print!("\x1b[{};{}H\x1b[38;5;{}m{}\u{25B3}\x1b[0m",
+                    cy, sx, sc, self.bg_seq());
             }
             if self.moredown {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{25BD}\x1b[0m",
-                    cy + ch - 1, sx, sc, self.bg);
+                print!("\x1b[{};{}H\x1b[38;5;{}m{}\u{25BD}\x1b[0m",
+                    cy + ch - 1, sx, sc, self.bg_seq());
             }
         }
 
@@ -293,7 +319,7 @@ impl Pane {
         self.moreup = self.ix > 0;
         self.moredown = self.ix + h < total;
 
-        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+        let bg_code = self.bg_seq();
         let fg_code = format!("\x1b[38;5;{}m", self.fg);
         let pane_colors = format!("{}{}", bg_code, fg_code);
 
@@ -353,12 +379,12 @@ impl Pane {
             let sc = self.scroll_fg.unwrap_or(self.fg);
             let sx = self.scroll_x.unwrap_or(cx + cw - 1);
             if self.moreup {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{2206}\x1b[0m",
-                    cy, sx, sc, self.bg);
+                print!("\x1b[{};{}H\x1b[38;5;{}m{}\u{2206}\x1b[0m",
+                    cy, sx, sc, self.bg_seq());
             }
             if self.moredown {
-                print!("\x1b[{};{}H\x1b[38;5;{}m\x1b[48;5;{}m\u{2207}\x1b[0m",
-                    cy + ch - 1, sx, sc, self.bg);
+                print!("\x1b[{};{}H\x1b[38;5;{}m{}\u{2207}\x1b[0m",
+                    cy + ch - 1, sx, sc, self.bg_seq());
             }
         }
 
@@ -515,10 +541,11 @@ impl Pane {
 
     /// Ask with temporary background color (e.g. dark blue for command input)
     pub fn ask_with_bg(&mut self, prompt: &str, initial: &str, temp_bg: u16) -> String {
-        let orig_bg = self.bg;
+        let (orig_bg, orig_rgb) = (self.bg, self.bg_rgb.take());
         self.bg = temp_bg;
         let result = self.ask(prompt, initial);
         self.bg = orig_bg;
+        self.bg_rgb = orig_rgb;
         result
     }
 
@@ -550,7 +577,7 @@ impl Pane {
         self.last_escaped = false;
 
         // Draw prompt + initial text
-        let redraw = |buf: &str, cursor: usize, prompt: &str, cx: u16, cy: u16, cw: u16, fg: u16, bg: u16, secret: bool| {
+        let redraw = |buf: &str, cursor: usize, prompt: &str, cx: u16, cy: u16, cw: u16, fg: u16, bg: &str, secret: bool| {
             let prompt_w = display_width(prompt);
             let edit_w = (cw as usize).saturating_sub(prompt_w).max(1);
             // Source for visible rendering: real chars unless secret
@@ -581,7 +608,7 @@ impl Pane {
             let win = edit_window(total_chars, cursor_chars, edit_w);
             let visible: String = source.chars().skip(win).take(edit_w).collect();
             let pad = " ".repeat(edit_w.saturating_sub(display_width(&visible)));
-            print!("\x1b[{};{}H\x1b[48;5;{}m\x1b[38;5;{}m{}{}{}\x1b[0m",
+            print!("\x1b[{};{}H{}\x1b[38;5;{}m{}{}{}\x1b[0m",
                 cy, cx, bg, fg, prompt, visible, pad);
             // Terminal cursor = prompt + display width of the visible
             // chars BETWEEN the window start and the cursor, clamped to
@@ -609,7 +636,7 @@ impl Pane {
         };
 
         crate::crossterm::execute!(io::stdout(), crate::crossterm::cursor::Show).ok();
-        redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg, self.secret);
+        redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, &self.bg_seq(), self.secret);
 
         loop {
             let ev = match event::read() {
@@ -731,7 +758,7 @@ impl Pane {
                 }
                 _ => {}
             }
-            redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, self.bg, self.secret);
+            redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, &self.bg_seq(), self.secret);
         }
 
         crate::crossterm::execute!(io::stdout(), crate::crossterm::cursor::Hide).ok();
@@ -926,7 +953,7 @@ impl Pane {
         let bottom = y + h;
         let bfg = self.border_fg.unwrap_or(self.fg);
         let fg_code = format!("\x1b[38;5;{}m", bfg);
-        let bg_code = format!("\x1b[48;5;{}m", self.bg);
+        let bg_code = self.bg_seq();
 
         // Top border: from (left, top) to (right, top)
         let hbar = "\u{2500}".repeat(w as usize);
@@ -1249,6 +1276,21 @@ fn strip_ansi_bg(s: &str) -> String {
 fn edit_window(total_chars: usize, cursor_chars: usize, edit_w: usize) -> usize {
     if total_chars <= edit_w { 0 }
     else { cursor_chars.saturating_sub(edit_w.saturating_sub(1)) }
+}
+
+#[cfg(test)]
+mod background_tests {
+    use super::Pane;
+
+    #[test]
+    fn a_true_colour_background_wins_over_the_256_one() {
+        let mut p = Pane::new(1, 1, 10, 1, 7, 0);
+        assert_eq!(p.bg_seq(), "\x1b[48;5;0m");
+        assert!(p.set_bg_hex("#280028"));
+        assert_eq!(p.bg_seq(), "\x1b[48;2;40;0;40m");
+        assert!(!p.set_bg_hex("purple"));
+        assert_eq!(p.bg_rgb, Some((40, 0, 40)));
+    }
 }
 
 #[cfg(test)]

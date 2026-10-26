@@ -49,6 +49,7 @@ let mut pane = Pane::new(x, y, w, h, fg, bg);
 pane.border = true;         // Border drawn OUTSIDE pane area
 pane.scroll = true;         // Show scroll indicators
 pane.align = Align::Left;   // Left, Center, Right
+pane.set_bg_hex("#280028"); // True colour background, over the 256-colour bg
 
 pane.set_text("content");   // Set content (preserves scroll)
 pane.say("text");           // Set + refresh + reset scroll
