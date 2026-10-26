@@ -165,6 +165,18 @@ impl Crust {
         );
     }
 
+    /// Ask the terminal to send Ctrl+Shift+letter apart from Ctrl+letter
+    /// (kitty keyboard protocol, flags 1 and 4, as Claude Code asks), so
+    /// they read as "C-S-W" and "C-W". Terminals without the protocol
+    /// ignore it, and both read as "C-W". Pop with `disable_modifier_keys`.
+    pub fn enable_ctrl_shift_keys() {
+        use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
+        let _ = crossterm::execute!(
+            io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS),
+        );
+    }
+
     /// Ask the terminal to report key releases and repeats as well as
     /// presses (kitty keyboard protocol, flags 1 and 2). Terminals
     /// without the protocol ignore it. Read them with

@@ -175,6 +175,12 @@ impl Input {
             }
             KeyCode::F(n) => format!("F{}", n),
             KeyCode::Char(' ') if ctrl => "C-SPACE".to_string(),
+            // Ctrl+Shift+letter only differs from Ctrl+letter once the
+            // terminal is asked (`enable_ctrl_shift_keys`). crossterm then
+            // reports the shift, or the shifted letter without it.
+            KeyCode::Char(c) if ctrl && (shift || c.is_ascii_uppercase()) => {
+                format!("C-S-{}", c.to_ascii_uppercase())
+            }
             KeyCode::Char(c) if ctrl => {
                 format!("C-{}", c.to_ascii_uppercase())
             }
@@ -200,5 +206,13 @@ mod tests {
         assert_eq!(Input::key_to_string(KeyCode::Char('1'), KeyModifiers::NONE), "1");
         Input::report_alt(false);
         assert_eq!(alt1(), "1");
+    }
+
+    #[test]
+    fn ctrl_shift_letters_have_their_own_name() {
+        let k = Input::key_to_string;
+        assert_eq!(k(KeyCode::Char('w'), KeyModifiers::CONTROL), "C-W");
+        assert_eq!(k(KeyCode::Char('w'), KeyModifiers::CONTROL | KeyModifiers::SHIFT), "C-S-W");
+        assert_eq!(k(KeyCode::Char('W'), KeyModifiers::CONTROL), "C-S-W");
     }
 }
