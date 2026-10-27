@@ -122,10 +122,11 @@ impl Input {
 
         match code {
             KeyCode::Esc => "ESC".to_string(),
-            // Shift+Enter only differs from Enter once the terminal is
-            // asked (`enable_ctrl_shift_keys`); Claude Code reads it as a
-            // new line.
+            // Shift+Enter (a new line in Claude Code) and Ctrl+Enter only
+            // differ from Enter once the terminal is asked
+            // (`enable_ctrl_shift_keys`).
             KeyCode::Enter if shift => "S-ENTER".to_string(),
+            KeyCode::Enter if ctrl => "C-ENTER".to_string(),
             KeyCode::Enter => "ENTER".to_string(),
             KeyCode::Tab => {
                 if shift { "S-TAB".to_string() } else { "TAB".to_string() }
@@ -222,6 +223,7 @@ mod tests {
         assert_eq!(k(KeyCode::Char('w'), KeyModifiers::CONTROL | KeyModifiers::SHIFT), "C-S-W");
         assert_eq!(k(KeyCode::Char('W'), KeyModifiers::CONTROL), "C-S-W");
         assert_eq!(k(KeyCode::Enter, KeyModifiers::SHIFT), "S-ENTER");
+        assert_eq!(k(KeyCode::Enter, KeyModifiers::CONTROL), "C-ENTER");
         assert_eq!(k(KeyCode::Enter, KeyModifiers::NONE), "ENTER");
     }
 }
