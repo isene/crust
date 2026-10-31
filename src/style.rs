@@ -226,6 +226,17 @@ pub fn title_seq(title: &str) -> String {
     format!("\x1b]0;{title}\x07")
 }
 
+/// glass's tint (OSC 7701): the whole terminal in one colour, each pixel
+/// keeping its brightness, while an app shows a look of its own (gluon's
+/// matrix look). None goes back to the tint the user's .glassrc asks
+/// for. Other terminals ignore it.
+pub fn tint_seq(rgb: Option<(u8, u8, u8)>) -> String {
+    match rgb {
+        Some((r, g, b)) => format!("\x1b]7701;#{r:02x}{g:02x}{b:02x}\x1b\\"),
+        None => "\x1b]7701;\x1b\\".into(),
+    }
+}
+
 pub fn sgr(spec: &str) -> String {
     format!("\x1b[{spec}m")
 }
@@ -294,4 +305,13 @@ pub fn rgb_to_xterm(r: u8, g: u8, b: u8) -> u8 {
     }
     // 6x6x6 color cube (indices 16-231)
     16 + 36 * (r / 51) + 6 * (g / 51) + (b / 51)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tint_seq_names_the_colour_or_goes_back() {
+        assert_eq!(super::tint_seq(Some((0, 255, 65))), "\x1b]7701;#00ff41\x1b\\");
+        assert_eq!(super::tint_seq(None), "\x1b]7701;\x1b\\");
+    }
 }
