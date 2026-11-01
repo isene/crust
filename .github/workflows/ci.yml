@@ -13,5 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
       - run: cargo check
+      # The web build (try page) has stand-ins of its own that must keep up.
+      - run: cargo check --target wasm32-wasip1
       - run: cargo test

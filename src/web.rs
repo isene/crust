@@ -138,6 +138,7 @@ pub mod event {
     impl KeyboardEnhancementFlags {
         pub const DISAMBIGUATE_ESCAPE_CODES: KeyboardEnhancementFlags = KeyboardEnhancementFlags(1);
         pub const REPORT_EVENT_TYPES: KeyboardEnhancementFlags = KeyboardEnhancementFlags(2);
+        pub const REPORT_ALTERNATE_KEYS: KeyboardEnhancementFlags = KeyboardEnhancementFlags(4);
     }
     impl std::ops::BitOr for KeyboardEnhancementFlags {
         type Output = Self;
