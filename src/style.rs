@@ -237,7 +237,7 @@ pub fn tint_seq(rgb: Option<(u8, u8, u8)>) -> String {
     }
 }
 
-/// glass's dim (OSC 7702): true shows the window at half brightness until
+/// glass's dim (OSC 7702): true shows the window at 20% brightness until
 /// a key is pressed in it, false lifts the dim. deck sends it when its
 /// session goes idle and when it works again. Other terminals ignore it.
 pub fn dim_seq(on: bool) -> &'static str {
