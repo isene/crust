@@ -237,6 +237,17 @@ pub fn tint_seq(rgb: Option<(u8, u8, u8)>) -> String {
     }
 }
 
+/// glass's dim (OSC 7702): true shows the window at half brightness until
+/// a key is pressed in it, false lifts the dim. deck sends it when its
+/// session goes idle and when it works again. Other terminals ignore it.
+pub fn dim_seq(on: bool) -> &'static str {
+    if on {
+        "\x1b]7702;1\x1b\\"
+    } else {
+        "\x1b]7702;0\x1b\\"
+    }
+}
+
 pub fn sgr(spec: &str) -> String {
     format!("\x1b[{spec}m")
 }
@@ -313,5 +324,11 @@ mod tests {
     fn tint_seq_names_the_colour_or_goes_back() {
         assert_eq!(super::tint_seq(Some((0, 255, 65))), "\x1b]7701;#00ff41\x1b\\");
         assert_eq!(super::tint_seq(None), "\x1b]7701;\x1b\\");
+    }
+
+    #[test]
+    fn dim_seq_turns_the_dim_on_and_off() {
+        assert_eq!(super::dim_seq(true), "\x1b]7702;1\x1b\\");
+        assert_eq!(super::dim_seq(false), "\x1b]7702;0\x1b\\");
     }
 }
