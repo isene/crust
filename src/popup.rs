@@ -8,19 +8,18 @@ pub struct Popup {
     pub pane: Pane,
 }
 
-/// One row drawn as the selection bar: the pane's colours swapped, set
-/// explicitly and re-armed after every reset inside the row.
+/// One row drawn as the selection bar: the pane's colours swapped, with
+/// the row's own colours and attributes taken out.
 ///
-/// Reverse video was the obvious way and was wrong: it swaps whatever
-/// fg the run has, so an item in its own colour got a bar of that colour
-/// under its text and a bar of the pane's fg under the padding. Two
-/// tones on one row. An explicit background is one tone, and the item's
-/// own fg still shows on top of it.
+/// Reverse video swapped whatever fg a run had, so an item in its own
+/// colour got a bar of two tones. Keeping the item's fg on the bar was
+/// no better: green on a white bar was hard to read, and a `39m` after it
+/// went back to the terminal's fg, which hid the rest of the row. Plain
+/// text in the bar's own fg reads the same in every colour.
 fn select_bar(line: &str, width: usize, fg: u16, bg: u16) -> String {
-    let bar = format!("{}{}", style::set_bg(fg as u8), style::set_fg(bg as u8));
-    let body = line.replace(style::RESET, &format!("{}{}", style::RESET, bar));
-    let pad = width.saturating_sub(crate::display_width(line));
-    format!("{bar}{body}{bar}{}{}", " ".repeat(pad), style::RESET)
+    let plain = crate::strip_ansi(line);
+    let pad = width.saturating_sub(crate::display_width(&plain));
+    format!("{}{}{plain}{}{}", style::set_bg(fg as u8), style::set_fg(bg as u8), " ".repeat(pad), style::RESET)
 }
 
 impl Popup {
@@ -160,5 +159,22 @@ impl Popup {
         for pane in refresh_panes.iter_mut() {
             pane.full_refresh();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_bar_is_plain_text_in_its_own_colours() {
+        let row = format!(" {}{}", style::fg("sonnet", 78), style::dim("  in use"));
+        let bar = select_bar(&row, 20, 231, 236);
+        let start = format!("{}{}", style::set_bg(231), style::set_fg(236));
+        assert!(bar.starts_with(&start));
+        // No colour of the item's own, and no reset to the terminal's fg, inside.
+        let inside = &bar[start.len()..bar.len() - style::RESET.len()];
+        assert!(!inside.contains('\x1b'));
+        assert_eq!(inside, format!("{:<20}", " sonnet  in use"));
     }
 }
