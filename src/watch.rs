@@ -48,7 +48,7 @@ impl Watch {
         if fd < 0 { return None; }
         // SAFETY: nothing else owns the descriptor.
         let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
-        crate::input::wake_on(fd.as_raw_fd());
+        crate::input::wake_on(fd.as_raw_fd(), "WATCH");
         Some(Watch { fd, wd: -1, path: PathBuf::new() })
     }
 
@@ -108,7 +108,7 @@ impl Watch {
 #[cfg(target_os = "linux")]
 impl Drop for Watch {
     fn drop(&mut self) {
-        crate::input::wake_on(-1);
+        crate::input::wake_on(-1, "");
     }
 }
 

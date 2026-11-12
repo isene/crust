@@ -27,6 +27,8 @@ pub mod style;
 pub mod text;
 #[cfg(not(target_os = "wasi"))]
 pub mod watch;
+#[cfg(not(target_os = "wasi"))]
+pub mod wake;
 
 // The terminal: crossterm, or in a web page the stand-in in web.rs.
 #[cfg(not(target_os = "wasi"))]
@@ -44,6 +46,8 @@ pub use popup::Popup;
 pub use input::Input;
 #[cfg(not(target_os = "wasi"))]
 pub use watch::Watch;
+#[cfg(not(target_os = "wasi"))]
+pub use wake::{Wake, Waker};
 pub use cursor::seq;
 pub use cursor::Cursor;
 

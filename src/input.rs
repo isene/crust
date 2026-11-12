@@ -8,13 +8,25 @@ use std::time::Duration;
 static ALT_KEYS: AtomicBool = AtomicBool::new(false);
 
 /// One more descriptor the key wait wakes up for, or -1: a
-/// [`Watch`](crate::Watch) sets it. The wait then returns "WATCH".
+/// [`Watch`](crate::Watch) or a [`Wake`](crate::Wake) sets it. The wait
+/// then returns "WATCH" or "WAKE".
 #[cfg(target_os = "linux")]
 static WAKE_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
 #[cfg(target_os = "linux")]
-pub(crate) fn wake_on(fd: i32) {
+pub(crate) fn wake_on(fd: i32, name: &str) {
+    WAKE_IS_THREAD.store(name == "WAKE", Ordering::Relaxed);
     WAKE_FD.store(fd, Ordering::Relaxed);
+}
+
+/// Whether the extra descriptor is a thread's wake, not a folder watch.
+#[cfg(target_os = "linux")]
+static WAKE_IS_THREAD: AtomicBool = AtomicBool::new(false);
+
+/// The name the wait returns when the extra descriptor woke it.
+#[cfg(target_os = "linux")]
+fn wake_name() -> String {
+    if WAKE_IS_THREAD.load(Ordering::Relaxed) { "WAKE" } else { "WATCH" }.to_string()
 }
 
 /// True when the extra descriptor has something to read.
@@ -146,7 +158,7 @@ impl Input {
     pub fn event_ms(timeout_ms: u64) -> Option<(String, KeyState)> {
         if !Self::ready(Duration::from_millis(timeout_ms)) { return None; }
         #[cfg(target_os = "linux")]
-        if woken() { return Some(("WATCH".to_string(), KeyState::Pressed)); }
+        if woken() { return Some((wake_name(), KeyState::Pressed)); }
         match event::read() {
             Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) => {
                 let state = match kind {
@@ -172,7 +184,7 @@ impl Input {
         }
         // A watched folder changed. The caller drains the watch.
         #[cfg(target_os = "linux")]
-        if woken() { return Some("WATCH".to_string()); }
+        if woken() { return Some(wake_name()); }
 
         let ev = match event::read() {
             Ok(ev) => ev,
