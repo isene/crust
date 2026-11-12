@@ -59,6 +59,9 @@ impl Input {
     /// program. So the wait itself is done here, and crossterm is only
     /// asked once the terminal is known to be alive. That costs two
     /// system calls more for each wait, and nothing while waiting.
+    /// The bug is known there (crossterm issue 793, open since 2023,
+    /// with fixes waiting as pull requests 1067, 1116 and 1165). When
+    /// one is merged and crust builds on it, this can go.
     #[cfg(target_os = "linux")]
     fn ready_linux(wait: Duration) -> Option<bool> {
         use std::sync::OnceLock;
