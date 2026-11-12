@@ -7,6 +7,26 @@ use std::time::Duration;
 /// Off: Alt+x reads as plain "x", as it always has. On: as "M-x".
 static ALT_KEYS: AtomicBool = AtomicBool::new(false);
 
+/// One more descriptor the key wait wakes up for, or -1: a
+/// [`Watch`](crate::Watch) sets it. The wait then returns "WATCH".
+#[cfg(target_os = "linux")]
+static WAKE_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+#[cfg(target_os = "linux")]
+pub(crate) fn wake_on(fd: i32) {
+    WAKE_FD.store(fd, Ordering::Relaxed);
+}
+
+/// True when the extra descriptor has something to read.
+#[cfg(target_os = "linux")]
+fn woken() -> bool {
+    let fd = WAKE_FD.load(Ordering::Relaxed);
+    if fd < 0 { return false; }
+    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    // SAFETY: one valid pollfd.
+    unsafe { libc::poll(&mut p, 1, 0) > 0 && p.revents & libc::POLLIN != 0 }
+}
+
 /// What happened to a key, for readers that ask with `event_ms`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyState { Pressed, Repeated, Released }
@@ -69,15 +89,19 @@ impl Input {
         static TTY: OnceLock<bool> = OnceLock::new();
         if !*TTY.get_or_init(|| unsafe { libc::isatty(0) } == 1) { return None; }
         const GONE: libc::c_short = libc::POLLHUP | libc::POLLERR;
+        // How many are ready, and whether the extra descriptor (a
+        // folder watch) is one of them.
         let look = |ms: libc::c_int| {
-            let mut fd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
-            let n = unsafe { libc::poll(&mut fd, 1, ms) };
-            if n > 0 && fd.revents & GONE != 0 { std::process::exit(1); }
-            n
+            let extra = WAKE_FD.load(Ordering::Relaxed);
+            let mut fds = [libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 },
+                libc::pollfd { fd: extra, events: libc::POLLIN, revents: 0 }];
+            let n = unsafe { libc::poll(fds.as_mut_ptr(), if extra >= 0 { 2 } else { 1 }, ms) };
+            if n > 0 && fds[0].revents & GONE != 0 { std::process::exit(1); }
+            (n, n > 0 && fds[1].revents & libc::POLLIN != 0)
         };
         let end = Instant::now() + wait;
         loop {
-            look(0);
+            if look(0).1 { return Some(true); }
             // What crossterm has: a key, or a resize it heard of.
             match event::poll(Duration::ZERO) {
                 Ok(true) => return Some(true),
@@ -88,7 +112,7 @@ impl Input {
             if left.is_zero() { return Some(false); }
             // Sleep until a key, the end of the wait, or a signal (a
             // resize is one). Zero means the wait is over.
-            if look(left.as_millis().min(i32::MAX as u128) as libc::c_int) == 0 { return Some(false); }
+            if look(left.as_millis().min(i32::MAX as u128) as libc::c_int).0 == 0 { return Some(false); }
         }
     }
 
@@ -112,6 +136,8 @@ impl Input {
     /// `getchr` keeps skipping releases so no other app sees a key twice.
     pub fn event_ms(timeout_ms: u64) -> Option<(String, KeyState)> {
         if !Self::ready(Duration::from_millis(timeout_ms)) { return None; }
+        #[cfg(target_os = "linux")]
+        if woken() { return Some(("WATCH".to_string(), KeyState::Pressed)); }
         match event::read() {
             Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) => {
                 let state = match kind {
@@ -135,6 +161,9 @@ impl Input {
         if !Self::ready(Duration::from_secs(timeout_secs.unwrap_or(86400))) {
             return None;
         }
+        // A watched folder changed. The caller drains the watch.
+        #[cfg(target_os = "linux")]
+        if woken() { return Some("WATCH".to_string()); }
 
         let ev = match event::read() {
             Ok(ev) => ev,

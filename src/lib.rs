@@ -25,6 +25,8 @@ pub mod input;
 pub mod cursor;
 pub mod style;
 pub mod text;
+#[cfg(not(target_os = "wasi"))]
+pub mod watch;
 
 // The terminal: crossterm, or in a web page the stand-in in web.rs.
 #[cfg(not(target_os = "wasi"))]
@@ -40,6 +42,8 @@ pub use pane::Pane;
 pub use msglog::MessageLog;
 pub use popup::Popup;
 pub use input::Input;
+#[cfg(not(target_os = "wasi"))]
+pub use watch::Watch;
 pub use cursor::seq;
 pub use cursor::Cursor;
 
