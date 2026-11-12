@@ -60,7 +60,7 @@ impl Input {
     /// busy until someone kills it. So the program ends.
     fn ready(wait: Duration) -> bool {
         #[cfg(target_os = "linux")]
-        if let Some(ready) = Self::ready_linux(wait) { return ready; }
+        if let Some(ready) = Self::ready_linux(wait, true) { return ready; }
         match event::poll(wait) {
             Ok(ready) => ready,
             #[cfg(not(target_os = "wasi"))]
@@ -83,7 +83,7 @@ impl Input {
     /// with fixes waiting as pull requests 1067, 1116 and 1165). When
     /// one is merged and crust builds on it, this can go.
     #[cfg(target_os = "linux")]
-    fn ready_linux(wait: Duration) -> Option<bool> {
+    fn ready_linux(wait: Duration, watch: bool) -> Option<bool> {
         use std::sync::OnceLock;
         use std::time::Instant;
         static TTY: OnceLock<bool> = OnceLock::new();
@@ -92,7 +92,7 @@ impl Input {
         // How many are ready, and whether the extra descriptor (a
         // folder watch) is one of them.
         let look = |ms: libc::c_int| {
-            let extra = WAKE_FD.load(Ordering::Relaxed);
+            let extra = if watch { WAKE_FD.load(Ordering::Relaxed) } else { -1 };
             let mut fds = [libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: extra, events: libc::POLLIN, revents: 0 }];
             let n = unsafe { libc::poll(fds.as_mut_ptr(), if extra >= 0 { 2 } else { 1 }, ms) };
@@ -114,6 +114,15 @@ impl Input {
             // resize is one). Zero means the wait is over.
             if look(left.as_millis().min(i32::MAX as u128) as libc::c_int).0 == 0 { return Some(false); }
         }
+    }
+
+    /// Wait for a key with no end, for code that reads its keys from
+    /// crossterm itself (a prompt). Like every wait here, it ends the
+    /// program when the terminal is gone. A folder watch does not wake
+    /// it: a prompt has no use for one.
+    pub(crate) fn wait_key() {
+        #[cfg(target_os = "linux")]
+        while Self::ready_linux(Duration::from_secs(86400), false) == Some(false) {}
     }
 
     /// As [`getchr`](Self::getchr), with the wait in milliseconds. For a

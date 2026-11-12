@@ -639,6 +639,8 @@ impl Pane {
         redraw(&buf, cursor, &self.prompt, cx, cy, cw, self.fg, &self.bg_seq(), self.secret);
 
         loop {
+            // A prompt on a terminal that is gone must end too.
+            crate::input::Input::wait_key();
             let ev = match event::read() {
                 Ok(ev) => ev,
                 Err(_) => break,
