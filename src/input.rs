@@ -39,12 +39,53 @@ impl Input {
     /// come, and a caller that loops on "no key yet" would keep a core
     /// busy until someone kills it. So the program ends.
     fn ready(wait: Duration) -> bool {
+        #[cfg(target_os = "linux")]
+        if let Some(ready) = Self::ready_linux(wait) { return ready; }
         match event::poll(wait) {
             Ok(ready) => ready,
             #[cfg(not(target_os = "wasi"))]
             Err(_) => std::process::exit(1),
             #[cfg(target_os = "wasi")]
             Err(_) => false,
+        }
+    }
+
+    /// The wait on Linux, when stdin is the terminal. None when it is
+    /// not, and the caller waits the old way.
+    ///
+    /// A terminal that is gone (its window killed, tmux stopped) reads
+    /// as zero bytes for ever, and crossterm reads it again and again
+    /// without ever coming back: a full core until someone kills the
+    /// program. So the wait itself is done here, and crossterm is only
+    /// asked once the terminal is known to be alive. That costs two
+    /// system calls more for each wait, and nothing while waiting.
+    #[cfg(target_os = "linux")]
+    fn ready_linux(wait: Duration) -> Option<bool> {
+        use std::sync::OnceLock;
+        use std::time::Instant;
+        static TTY: OnceLock<bool> = OnceLock::new();
+        if !*TTY.get_or_init(|| unsafe { libc::isatty(0) } == 1) { return None; }
+        const GONE: libc::c_short = libc::POLLHUP | libc::POLLERR;
+        let look = |ms: libc::c_int| {
+            let mut fd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+            let n = unsafe { libc::poll(&mut fd, 1, ms) };
+            if n > 0 && fd.revents & GONE != 0 { std::process::exit(1); }
+            n
+        };
+        let end = Instant::now() + wait;
+        loop {
+            look(0);
+            // What crossterm has: a key, or a resize it heard of.
+            match event::poll(Duration::ZERO) {
+                Ok(true) => return Some(true),
+                Ok(false) => {}
+                Err(_) => std::process::exit(1),
+            }
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() { return Some(false); }
+            // Sleep until a key, the end of the wait, or a signal (a
+            // resize is one). Zero means the wait is over.
+            if look(left.as_millis().min(i32::MAX as u128) as libc::c_int) == 0 { return Some(false); }
         }
     }
 
