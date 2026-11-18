@@ -53,7 +53,7 @@ impl Popup {
         self.pane.border_refresh();
         self.pane.refresh();
         loop {
-            if let Some(key) = Input::getchr(None) {
+            if let Some(key) = Input::without_wake(|| Input::getchr(None)) {
                 match key.as_str() {
                     "ESC" | "q" | "ENTER" => return,
                     "UP" | "k" => { self.pane.lineup(); }
@@ -84,7 +84,7 @@ impl Popup {
         self.render(&items);
 
         loop {
-            let key = match Input::getchr(None) {
+            let key = match Input::without_wake(|| Input::getchr(None)) {
                 Some(k) => k,
                 None => continue,
             };

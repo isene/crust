@@ -562,7 +562,7 @@ impl Pane {
 
     /// Single-line editor with history support
     pub fn editline(&mut self) -> String {
-        use crate::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+        use crate::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
         let (cx, cy, cw, _) = self.content_area();
 
@@ -646,6 +646,9 @@ impl Pane {
                 Err(_) => break,
             };
             match ev {
+                // With release reports on, a key comes twice: pressed and
+                // released. Only the press types.
+                Event::Key(KeyEvent { kind: KeyEventKind::Release, .. }) => {}
                 Event::Key(KeyEvent { code, modifiers, .. }) => {
                     match (code, modifiers) {
                         (KeyCode::Enter, _) => break,

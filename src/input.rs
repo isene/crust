@@ -128,6 +128,23 @@ impl Input {
         }
     }
 
+    /// Run `f` with the wake or folder watch switched off, so its own key
+    /// loop never sees "WAKE" or "WATCH". A popup or a picker opened from a
+    /// program with a [`Wake`](crate::Wake) needs it: nobody inside drains
+    /// the wake, so every wait would return at once and keep a core busy.
+    /// What woke meanwhile is still there for the main loop afterwards.
+    pub fn without_wake<T>(f: impl FnOnce() -> T) -> T {
+        #[cfg(target_os = "linux")]
+        {
+            let fd = WAKE_FD.swap(-1, Ordering::Relaxed);
+            let r = f();
+            WAKE_FD.store(fd, Ordering::Relaxed);
+            r
+        }
+        #[cfg(not(target_os = "linux"))]
+        f()
+    }
+
     /// Wait for a key with no end, for code that reads its keys from
     /// crossterm itself (a prompt). Like every wait here, it ends the
     /// program when the terminal is gone. A folder watch does not wake
@@ -308,6 +325,18 @@ mod tests {
         assert_eq!(Input::key_to_string(KeyCode::Char('1'), KeyModifiers::NONE), "1");
         Input::report_alt(false);
         assert_eq!(alt1(), "1");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn no_wake_inside_without_wake() {
+        let fd = unsafe { libc::eventfd(1, 0) };
+        wake_on(fd, "WAKE");
+        assert!(woken());
+        assert!(!Input::without_wake(woken));
+        assert!(woken());
+        wake_on(-1, "");
+        unsafe { libc::close(fd) };
     }
 
     #[test]
