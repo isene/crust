@@ -754,6 +754,44 @@ pub fn truncate_ansi(s: &str, max_width: usize) -> String {
     result
 }
 
+/// True once a new build has replaced the program file this copy runs
+/// from: Linux then marks the running copy " (deleted)". One readlink per
+/// call until it fires, none after. False where there is no /proc.
+pub fn rebuilt() -> bool {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static OLD: AtomicBool = AtomicBool::new(false);
+    if OLD.load(Ordering::Relaxed) {
+        return true;
+    }
+    let old = std::fs::read_link("/proc/self/exe").is_ok_and(|p| p.to_string_lossy().ends_with(" (deleted)"));
+    if old {
+        OLD.store(true, Ordering::Relaxed);
+    }
+    old
+}
+
+/// The version for the right end of an app's bottom bar, as every Fe2O3
+/// app shows it: "galaxy v0.1.3 " in dim grey, or "galaxy v0.1.3 is old:
+/// restart " in bold amber once a rebuild has replaced the running copy.
+pub fn version_tag(app: &str, version: &str) -> String {
+    if rebuilt() {
+        style::bold(&style::fg(&format!("{app} v{version} is old: restart "), 208))
+    } else {
+        style::dim(&format!("{app} v{version} "))
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn the_version_tag_names_the_app() {
+        assert!(!rebuilt(), "a test runs from the file it was built to");
+        assert_eq!(strip_ansi(&version_tag("galaxy", "0.1.3")), "galaxy v0.1.3 ");
+    }
+}
+
 #[cfg(test)]
 mod width_tests {
     use super::*;
