@@ -781,6 +781,16 @@ pub fn version_tag(app: &str, version: &str) -> String {
     }
 }
 
+/// A bar's text with the app's version tag at its right end: the text is
+/// cut to leave room, then padded so the tag ends at column `cols`.
+pub fn with_version(text: &str, cols: usize, app: &str, version: &str) -> String {
+    let tag = version_tag(app, version);
+    let tw = display_width(&tag);
+    let text = truncate_ansi(text, cols.saturating_sub(tw + 1));
+    let pad = cols.saturating_sub(display_width(&text) + tw);
+    format!("{text}{}{tag}", " ".repeat(pad))
+}
+
 #[cfg(test)]
 mod version_tests {
     use super::*;
@@ -789,6 +799,14 @@ mod version_tests {
     fn the_version_tag_names_the_app() {
         assert!(!rebuilt(), "a test runs from the file it was built to");
         assert_eq!(strip_ansi(&version_tag("galaxy", "0.1.3")), "galaxy v0.1.3 ");
+    }
+
+    #[test]
+    fn the_version_ends_the_bar() {
+        assert_eq!(strip_ansi(&with_version("q quit", 24, "moon", "0.2.0")), "q quit      moon v0.2.0 ");
+        let cut = strip_ansi(&with_version("a long line of keys", 16, "moon", "0.2.0"));
+        assert_eq!(display_width(&cut), 16);
+        assert!(cut.starts_with("a ") && cut.ends_with(" moon v0.2.0 "));
     }
 }
 
