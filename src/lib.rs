@@ -786,7 +786,13 @@ pub fn version_tag(app: &str, version: &str) -> String {
 pub fn with_version(text: &str, cols: usize, app: &str, version: &str) -> String {
     let tag = version_tag(app, version);
     let tw = display_width(&tag);
-    let text = truncate_ansi(text, cols.saturating_sub(tw + 1));
+    let mut cut = truncate_ansi(text, cols.saturating_sub(tw + 1));
+    // A plain text needs no closing reset, and that reset would also end a
+    // background the caller puts around the whole bar (yank's tabs).
+    if !text.contains('\x1b') && cut.ends_with(style::RESET) {
+        cut.truncate(cut.len() - style::RESET.len());
+    }
+    let text = cut;
     let pad = cols.saturating_sub(display_width(&text) + tw);
     format!("{text}{}{tag}", " ".repeat(pad))
 }
@@ -807,6 +813,13 @@ mod version_tests {
         let cut = strip_ansi(&with_version("a long line of keys", 16, "moon", "0.2.0"));
         assert_eq!(display_width(&cut), 16);
         assert!(cut.starts_with("a ") && cut.ends_with(" moon v0.2.0 "));
+    }
+
+    #[test]
+    fn a_plain_bar_keeps_the_callers_background() {
+        for text in ["q quit", "a long line of keys"] {
+            assert!(!with_version(text, 16, "moon", "0.2.0").contains(style::RESET), "{text}");
+        }
     }
 }
 
